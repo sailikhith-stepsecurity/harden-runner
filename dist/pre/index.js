@@ -85675,62 +85675,99 @@ function installWindowsAgent(configStr) {
             const configPath = external_path_.join(agentDir, "config.json");
             external_fs_.writeFileSync(configPath, configStr);
             lib_core.info(`Created config file: ${configPath}`);
-            // Start the agent as a background process with combined stdout/stderr logging
+            // Install NSSM and use it to run agent as a Windows Service
+            lib_core.info("Installing Windows Agent as a service using NSSM...");
+            const serviceName = "StepSecurityAgent";
             const logPath = external_path_.join(agentDir, "agent.log");
-            lib_core.info("Starting Windows Agent...");
-            // PowerShell script to start agent with combined logging
-            const startScript = `
-# Start agent with combined stdout/stderr logging
+            try {
+                // PowerShell script to install NSSM, create and start service
+                const serviceScript = `
+$serviceName = "${serviceName}"
 $agentPath = "${agentExePath}"
-$logPath = "${logPath}"
 $agentDir = "${agentDir}"
-$pidFile = "$agentDir\\agent.pid"
+$logPath = "${logPath}"
 
-Write-Host "Starting agent from: $agentPath"
-Write-Host "Working directory: $agentDir"
-Write-Host "Log file: $logPath"
+Write-Host "Installing NSSM (Non-Sucking Service Manager)..."
 
+# Install NSSM using chocolatey
 try {
-  # Start process and redirect both stdout and stderr to same log file
-  $process = Start-Process -FilePath $agentPath \`
-    -WorkingDirectory $agentDir \`
-    -NoNewWindow \`
-    -PassThru \`
-    -RedirectStandardOutput $logPath \`
-    -RedirectStandardError $logPath
-
-  if ($process -and $process.Id) {
-    # Save PID for cleanup in post-step
-    $process.Id | Out-File -FilePath $pidFile -Encoding utf8 -NoNewline
-
-    Write-Host "Agent started successfully with PID: $($process.Id)"
-    Write-Host "PID saved to: $pidFile"
-    Write-Host "Logs are being written to: $logPath"
-
-    # Verify PID was saved
-    if (Test-Path $pidFile) {
-      $savedPid = Get-Content $pidFile -Raw
-      Write-Host "Verified PID in file: $savedPid"
-    } else {
-      Write-Warning "PID file was not created!"
-    }
-  } else {
-    Write-Error "Failed to start agent process"
+  choco install nssm -y --no-progress
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to install NSSM via chocolatey"
     exit 1
   }
+  Write-Host "NSSM installed successfully"
 } catch {
-  Write-Error "Error starting agent: $_"
+  Write-Error "Error installing NSSM: $_"
   exit 1
 }
+
+# Refresh environment to get NSSM in PATH
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+Write-Host "Creating service: $serviceName"
+
+# Check if service already exists and remove it
+$existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if ($existingService) {
+  Write-Host "Service already exists, removing..."
+  nssm stop $serviceName
+  nssm remove $serviceName confirm
+  Start-Sleep -Seconds 2
+}
+
+# Install service using NSSM
+Write-Host "Installing service with NSSM..."
+nssm install $serviceName "$agentPath"
+
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "Failed to install service with NSSM"
+  exit 1
+}
+
+# Configure service
+Write-Host "Configuring service..."
+nssm set $serviceName AppDirectory "$agentDir"
+nssm set $serviceName AppStdout "$logPath"
+nssm set $serviceName AppStderr "$logPath"
+nssm set $serviceName DisplayName "StepSecurity Harden Runner Agent"
+nssm set $serviceName Description "Security monitoring agent for GitHub Actions"
+
+# Start the service
+Write-Host "Starting service..."
+nssm start $serviceName
+
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "Failed to start service"
+  nssm remove $serviceName confirm
+  exit 1
+}
+
+Write-Host "Service started successfully"
+
+# Wait a moment for service to initialize
+Start-Sleep -Seconds 2
+
+# Check service status
+$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if ($service) {
+  Write-Host "Service Status: $($service.Status)"
+} else {
+  Write-Warning "Could not retrieve service status"
+}
 `;
-            const scriptPath = external_path_.join(agentDir, "start-agent.ps1");
-            external_fs_.writeFileSync(scriptPath, startScript);
-            external_child_process_.execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
-                stdio: "inherit",
-            });
-            lib_core.info("Windows Agent started successfully");
-            // Note: Agent status check is handled in setup.ts
-            return true;
+                const scriptPath = external_path_.join(agentDir, "install-service.ps1");
+                external_fs_.writeFileSync(scriptPath, serviceScript);
+                external_child_process_.execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+                    stdio: "inherit",
+                });
+                lib_core.info("Windows Agent service installed and started successfully");
+                return true;
+            }
+            catch (error) {
+                lib_core.setFailed(`Failed to install Windows agent service: ${error.message}`);
+                return false;
+            }
         }
         catch (error) {
             lib_core.setFailed(`Failed to install Windows agent: ${error.message}`);

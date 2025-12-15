@@ -100,54 +100,49 @@ import { context } from "@actions/github";
       console.log(content);
     }
 
-    // Stop agent process
-    const pidFile = path.join(agentDir, "agent.pid");
-    if (fs.existsSync(pidFile)) {
-      try {
-        const pid = fs.readFileSync(pidFile, "utf-8").trim();
+    // Stop and remove agent service
+    console.log("Stopping Windows Agent service...");
+    const serviceName = "StepSecurityAgent";
 
-        if (!pid || pid === "") {
-          console.log("Warning: PID file is empty. Agent may not have started successfully.");
-          console.log("Attempting to find and stop agent process by name...");
+    try {
+      // Check if service exists
+      const serviceExists = cp.execSync(
+        `powershell -Command "Get-Service -Name ${serviceName} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name"`,
+        { encoding: "utf8" }
+      ).trim();
 
-          try {
-            // Try to stop by process name
-            cp.execSync(
-              `powershell -Command "Get-Process -Name 'agent' -ErrorAction SilentlyContinue | Stop-Process -Force"`,
-              { encoding: "utf8" }
-            );
-            console.log("Agent process stopped by name");
-          } catch (stopError) {
-            console.log("No agent process found running");
-          }
-        } else {
-          console.log(`Stopping agent process with PID: ${pid}`);
+      if (serviceExists) {
+        console.log(`Service ${serviceName} found, stopping and removing...`);
 
-          // Use PowerShell to stop the process
-          cp.execSync(
-            `powershell -Command "Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue"`,
-            { encoding: "utf8" }
-          );
-
-          console.log("Agent process stopped");
+        // Stop the service using NSSM
+        try {
+          cp.execSync(`nssm stop ${serviceName}`, {
+            encoding: "utf8",
+            stdio: "inherit",
+          });
+          console.log("Service stopped");
+        } catch (stopError) {
+          console.log("Warning: Could not stop service:", stopError.message);
         }
-      } catch (error) {
-        console.log("Warning: Could not stop agent process:", error.message);
-      }
-    } else {
-      console.log("Warning: PID file not found. Agent may not have started.");
-      console.log("Attempting to find and stop agent process by name...");
 
-      try {
-        // Try to stop by process name
-        cp.execSync(
-          `powershell -Command "Get-Process -Name 'agent' -ErrorAction SilentlyContinue | Stop-Process -Force"`,
-          { encoding: "utf8" }
-        );
-        console.log("Agent process stopped by name");
-      } catch (stopError) {
-        console.log("No agent process found running");
+        // Wait a moment for service to stop
+        cp.execSync("powershell -Command \"Start-Sleep -Seconds 2\"");
+
+        // Remove the service
+        try {
+          cp.execSync(`nssm remove ${serviceName} confirm`, {
+            encoding: "utf8",
+            stdio: "inherit",
+          });
+          console.log("Service removed");
+        } catch (removeError) {
+          console.log("Warning: Could not remove service:", removeError.message);
+        }
+      } else {
+        console.log(`Service ${serviceName} not found. May not have been installed.`);
       }
+    } catch (error) {
+      console.log("Warning: Error managing service:", error.message);
     }
   } else {
     // Linux cleanup
@@ -224,7 +219,7 @@ import { context } from "@actions/github";
   }
 })();
 
-function sleep(ms) {
+function sleep(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });

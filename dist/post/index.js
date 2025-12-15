@@ -32215,45 +32215,45 @@ var cleanup_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _
             var content = external_fs_.readFileSync(status, "utf-8");
             console.log(content);
         }
-        // Stop agent process
-        const pidFile = external_path_.join(agentDir, "agent.pid");
-        if (external_fs_.existsSync(pidFile)) {
-            try {
-                const pid = external_fs_.readFileSync(pidFile, "utf-8").trim();
-                if (!pid || pid === "") {
-                    console.log("Warning: PID file is empty. Agent may not have started successfully.");
-                    console.log("Attempting to find and stop agent process by name...");
-                    try {
-                        // Try to stop by process name
-                        external_child_process_.execSync(`powershell -Command "Get-Process -Name 'agent' -ErrorAction SilentlyContinue | Stop-Process -Force"`, { encoding: "utf8" });
-                        console.log("Agent process stopped by name");
-                    }
-                    catch (stopError) {
-                        console.log("No agent process found running");
-                    }
+        // Stop and remove agent service
+        console.log("Stopping Windows Agent service...");
+        const serviceName = "StepSecurityAgent";
+        try {
+            // Check if service exists
+            const serviceExists = external_child_process_.execSync(`powershell -Command "Get-Service -Name ${serviceName} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name"`, { encoding: "utf8" }).trim();
+            if (serviceExists) {
+                console.log(`Service ${serviceName} found, stopping and removing...`);
+                // Stop the service using NSSM
+                try {
+                    external_child_process_.execSync(`nssm stop ${serviceName}`, {
+                        encoding: "utf8",
+                        stdio: "inherit",
+                    });
+                    console.log("Service stopped");
                 }
-                else {
-                    console.log(`Stopping agent process with PID: ${pid}`);
-                    // Use PowerShell to stop the process
-                    external_child_process_.execSync(`powershell -Command "Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue"`, { encoding: "utf8" });
-                    console.log("Agent process stopped");
+                catch (stopError) {
+                    console.log("Warning: Could not stop service:", stopError.message);
+                }
+                // Wait a moment for service to stop
+                external_child_process_.execSync("powershell -Command \"Start-Sleep -Seconds 2\"");
+                // Remove the service
+                try {
+                    external_child_process_.execSync(`nssm remove ${serviceName} confirm`, {
+                        encoding: "utf8",
+                        stdio: "inherit",
+                    });
+                    console.log("Service removed");
+                }
+                catch (removeError) {
+                    console.log("Warning: Could not remove service:", removeError.message);
                 }
             }
-            catch (error) {
-                console.log("Warning: Could not stop agent process:", error.message);
+            else {
+                console.log(`Service ${serviceName} not found. May not have been installed.`);
             }
         }
-        else {
-            console.log("Warning: PID file not found. Agent may not have started.");
-            console.log("Attempting to find and stop agent process by name...");
-            try {
-                // Try to stop by process name
-                external_child_process_.execSync(`powershell -Command "Get-Process -Name 'agent' -ErrorAction SilentlyContinue | Stop-Process -Force"`, { encoding: "utf8" });
-                console.log("Agent process stopped by name");
-            }
-            catch (stopError) {
-                console.log("No agent process found running");
-            }
+        catch (error) {
+            console.log("Warning: Error managing service:", error.message);
         }
     }
     else {
