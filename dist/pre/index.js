@@ -85598,6 +85598,50 @@ function installWindowsAgent(configStr) {
             try {
                 // Set GH_TOKEN environment variable for gh CLI
                 const ghEnv = Object.assign(Object.assign({}, process.env), { GH_TOKEN: token });
+                // First, verify access to the repository
+                lib_core.info("Verifying access to repository...");
+                try {
+                    const verifyRepoCmd = `gh repo view ${repo} --json nameWithOwner,isPrivate`;
+                    const repoInfo = external_child_process_.execSync(verifyRepoCmd, {
+                        encoding: "utf8",
+                        env: ghEnv,
+                    });
+                    lib_core.info(`Repository access confirmed: ${repo}`);
+                    lib_core.info(`Repository info: ${repoInfo}`);
+                }
+                catch (verifyError) {
+                    lib_core.setFailed(`Cannot access repository ${repo}. Please ensure:\n` +
+                        `  1. The repository exists\n` +
+                        `  2. The token has 'repo' scope\n` +
+                        `  3. The token is passed via 'token' input\n` +
+                        `Error: ${verifyError.message}`);
+                    return false;
+                }
+                // Check for available releases
+                lib_core.info("Checking for available releases...");
+                try {
+                    const listReleasesCmd = `gh release list --repo ${repo} --limit 5`;
+                    const releasesList = external_child_process_.execSync(listReleasesCmd, {
+                        encoding: "utf8",
+                        env: ghEnv,
+                    });
+                    if (releasesList.trim()) {
+                        lib_core.info("Available releases:");
+                        lib_core.info(releasesList);
+                    }
+                    else {
+                        lib_core.setFailed(`No releases found in ${repo}.\n` +
+                            `Please create a release first:\n` +
+                            `  1. Go to https://github.com/${repo}/releases\n` +
+                            `  2. Create a new release with a tag (e.g., v0.0.1)\n` +
+                            `  3. Upload the windows-agent-amd64.exe binary`);
+                        return false;
+                    }
+                }
+                catch (listError) {
+                    lib_core.setFailed(`Failed to list releases from ${repo}: ${listError.message}`);
+                    return false;
+                }
                 // Get latest release tag
                 const getReleaseCmd = `gh release view --repo ${repo} --json tagName --jq .tagName`;
                 const releaseTag = external_child_process_.execSync(getReleaseCmd, {

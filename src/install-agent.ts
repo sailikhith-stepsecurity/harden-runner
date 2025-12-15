@@ -99,6 +99,55 @@ export async function installWindowsAgent(
       // Set GH_TOKEN environment variable for gh CLI
       const ghEnv = { ...process.env, GH_TOKEN: token };
 
+      // First, verify access to the repository
+      core.info("Verifying access to repository...");
+      try {
+        const verifyRepoCmd = `gh repo view ${repo} --json nameWithOwner,isPrivate`;
+        const repoInfo = cp.execSync(verifyRepoCmd, {
+          encoding: "utf8",
+          env: ghEnv,
+        });
+        core.info(`Repository access confirmed: ${repo}`);
+        core.info(`Repository info: ${repoInfo}`);
+      } catch (verifyError) {
+        core.setFailed(
+          `Cannot access repository ${repo}. Please ensure:\n` +
+          `  1. The repository exists\n` +
+          `  2. The token has 'repo' scope\n` +
+          `  3. The token is passed via 'token' input\n` +
+          `Error: ${verifyError.message}`
+        );
+        return false;
+      }
+
+      // Check for available releases
+      core.info("Checking for available releases...");
+      try {
+        const listReleasesCmd = `gh release list --repo ${repo} --limit 5`;
+        const releasesList = cp.execSync(listReleasesCmd, {
+          encoding: "utf8",
+          env: ghEnv,
+        });
+        if (releasesList.trim()) {
+          core.info("Available releases:");
+          core.info(releasesList);
+        } else {
+          core.setFailed(
+            `No releases found in ${repo}.\n` +
+            `Please create a release first:\n` +
+            `  1. Go to https://github.com/${repo}/releases\n` +
+            `  2. Create a new release with a tag (e.g., v0.0.1)\n` +
+            `  3. Upload the windows-agent-amd64.exe binary`
+          );
+          return false;
+        }
+      } catch (listError) {
+        core.setFailed(
+          `Failed to list releases from ${repo}: ${listError.message}`
+        );
+        return false;
+      }
+
       // Get latest release tag
       const getReleaseCmd = `gh release view --repo ${repo} --json tagName --jq .tagName`;
       const releaseTag = cp.execSync(getReleaseCmd, {
