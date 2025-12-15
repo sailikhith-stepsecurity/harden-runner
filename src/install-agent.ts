@@ -90,7 +90,7 @@ export async function installWindowsAgent(
     );
 
     // Download Windows agent from private repository using gh CLI
-    const repo = "sailikhith-stepsecurity/win-workflows";
+    const repo = "sailikhith-stepsecurity/win-agent";
     const agentExePath = path.join(agentDir, "agent.exe");
 
     core.info(`Downloading Windows agent from ${repo}...`);

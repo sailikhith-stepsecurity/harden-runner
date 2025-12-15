@@ -85592,7 +85592,7 @@ function installWindowsAgent(configStr) {
                 encoding: "utf8",
             });
             // Download Windows agent from private repository using gh CLI
-            const repo = "sailikhith-stepsecurity/win-workflows";
+            const repo = "sailikhith-stepsecurity/win-agent";
             const agentExePath = external_path_.join(agentDir, "agent.exe");
             lib_core.info(`Downloading Windows agent from ${repo}...`);
             try {
