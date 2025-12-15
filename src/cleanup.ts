@@ -105,16 +105,48 @@ import { context } from "@actions/github";
     if (fs.existsSync(pidFile)) {
       try {
         const pid = fs.readFileSync(pidFile, "utf-8").trim();
-        console.log(`Stopping agent process with PID: ${pid}`);
 
-        // Use PowerShell to stop the process
-        cp.execSync(`powershell -Command "Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue"`, {
-          encoding: "utf8",
-        });
+        if (!pid || pid === "") {
+          console.log("Warning: PID file is empty. Agent may not have started successfully.");
+          console.log("Attempting to find and stop agent process by name...");
 
-        console.log("Agent process stopped");
+          try {
+            // Try to stop by process name
+            cp.execSync(
+              `powershell -Command "Get-Process -Name 'agent' -ErrorAction SilentlyContinue | Stop-Process -Force"`,
+              { encoding: "utf8" }
+            );
+            console.log("Agent process stopped by name");
+          } catch (stopError) {
+            console.log("No agent process found running");
+          }
+        } else {
+          console.log(`Stopping agent process with PID: ${pid}`);
+
+          // Use PowerShell to stop the process
+          cp.execSync(
+            `powershell -Command "Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue"`,
+            { encoding: "utf8" }
+          );
+
+          console.log("Agent process stopped");
+        }
       } catch (error) {
         console.log("Warning: Could not stop agent process:", error.message);
+      }
+    } else {
+      console.log("Warning: PID file not found. Agent may not have started.");
+      console.log("Attempting to find and stop agent process by name...");
+
+      try {
+        // Try to stop by process name
+        cp.execSync(
+          `powershell -Command "Get-Process -Name 'agent' -ErrorAction SilentlyContinue | Stop-Process -Force"`,
+          { encoding: "utf8" }
+        );
+        console.log("Agent process stopped by name");
+      } catch (stopError) {
+        console.log("No agent process found running");
       }
     }
   } else {

@@ -196,20 +196,44 @@ export async function installWindowsAgent(
 $agentPath = "${agentExePath}"
 $logPath = "${logPath}"
 $agentDir = "${agentDir}"
+$pidFile = "$agentDir\\agent.pid"
 
-# Start process and redirect both stdout and stderr to same log file
-$process = Start-Process -FilePath $agentPath \`
-  -WorkingDirectory $agentDir \`
-  -NoNewWindow \`
-  -PassThru \`
-  -RedirectStandardOutput $logPath \`
-  -RedirectStandardError $logPath
+Write-Host "Starting agent from: $agentPath"
+Write-Host "Working directory: $agentDir"
+Write-Host "Log file: $logPath"
 
-# Save PID for cleanup in post-step
-$process.Id | Out-File -FilePath "$agentDir\\agent.pid" -Encoding utf8
+try {
+  # Start process and redirect both stdout and stderr to same log file
+  $process = Start-Process -FilePath $agentPath \`
+    -WorkingDirectory $agentDir \`
+    -NoNewWindow \`
+    -PassThru \`
+    -RedirectStandardOutput $logPath \`
+    -RedirectStandardError $logPath
 
-Write-Host "Agent started with PID: $($process.Id)"
-Write-Host "Logs are being written to: $logPath"
+  if ($process -and $process.Id) {
+    # Save PID for cleanup in post-step
+    $process.Id | Out-File -FilePath $pidFile -Encoding utf8 -NoNewline
+
+    Write-Host "Agent started successfully with PID: $($process.Id)"
+    Write-Host "PID saved to: $pidFile"
+    Write-Host "Logs are being written to: $logPath"
+
+    # Verify PID was saved
+    if (Test-Path $pidFile) {
+      $savedPid = Get-Content $pidFile -Raw
+      Write-Host "Verified PID in file: $savedPid"
+    } else {
+      Write-Warning "PID file was not created!"
+    }
+  } else {
+    Write-Error "Failed to start agent process"
+    exit 1
+  }
+} catch {
+  Write-Error "Error starting agent: $_"
+  exit 1
+}
 `;
 
     const scriptPath = path.join(agentDir, "start-agent.ps1");
