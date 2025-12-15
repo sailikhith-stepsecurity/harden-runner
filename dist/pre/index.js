@@ -85250,6 +85250,7 @@ function addSummary() {
 const STATUS_HARDEN_RUNNER_UNAVAILABLE = "409";
 const CONTAINER_MESSAGE = "This job is running in a container. Such jobs can be monitored by installing Harden Runner in a custom VM image for GitHub-hosted runners.";
 const UBUNTU_MESSAGE = "This job is not running in a GitHub Actions Hosted Runner Ubuntu VM. Harden Runner is only supported on Ubuntu VM. This job will not be monitored.";
+const UNSUPPORTED_PLATFORM_MESSAGE = "This job is not running on a supported platform. Harden Runner supports Linux (Ubuntu) and Windows runners. This job will not be monitored.";
 const SELF_HOSTED_RUNNER_MESSAGE = "This job is running on a self-hosted runner.";
 const HARDEN_RUNNER_UNAVAILABLE_MESSAGE = "Sorry, we are currently experiencing issues with the Harden Runner installation process. It is currently unavailable.";
 const ARC_RUNNER_MESSAGE = "Workflow is currently being executed in ARC based runner.";
@@ -85310,9 +85311,9 @@ function isValidEvent() {
 }
 
 ;// CONCATENATED MODULE: ./src/configs.ts
-const STEPSECURITY_ENV = "agent"; // agent or int
+const STEPSECURITY_ENV = "int"; // agent or int
 const configs_STEPSECURITY_API_URL = `https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`;
-const STEPSECURITY_WEB_URL = "https://app.stepsecurity.io";
+const STEPSECURITY_WEB_URL = "https://int1.stepsecurity.io";
 
 ;// CONCATENATED MODULE: ./src/policy-utils.ts
 var policy_utils_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
@@ -85576,6 +85577,99 @@ function installAgent(isTLS, configStr) {
         return true;
     });
 }
+function installWindowsAgent(configStr) {
+    return install_agent_awaiter(this, void 0, void 0, function* () {
+        try {
+            // Note: to avoid github rate limiting
+            const token = lib_core.getInput("token", { required: true });
+            // Set up agent directory at C:\agent (mirrors Linux /home/agent)
+            const agentDir = "C:\\agent";
+            lib_core.info(`Creating agent directory: ${agentDir}`);
+            if (!external_fs_.existsSync(agentDir)) {
+                external_fs_.mkdirSync(agentDir, { recursive: true });
+            }
+            external_fs_.appendFileSync(process.env.GITHUB_STATE, `agentDir=${agentDir}${external_os_.EOL}`, {
+                encoding: "utf8",
+            });
+            // Download Windows agent from private repository using gh CLI
+            const repo = "sailikhith-stepsecurity/win-workflows";
+            const agentExePath = external_path_.join(agentDir, "agent.exe");
+            lib_core.info(`Downloading Windows agent from ${repo}...`);
+            try {
+                // Set GH_TOKEN environment variable for gh CLI
+                const ghEnv = Object.assign(Object.assign({}, process.env), { GH_TOKEN: token });
+                // Get latest release tag
+                const getReleaseCmd = `gh release view --repo ${repo} --json tagName --jq .tagName`;
+                const releaseTag = external_child_process_.execSync(getReleaseCmd, {
+                    encoding: "utf8",
+                    env: ghEnv,
+                }).trim();
+                if (!releaseTag) {
+                    lib_core.setFailed(`No release found in ${repo}`);
+                    return false;
+                }
+                lib_core.info(`Latest release: ${releaseTag}`);
+                // Download the windows-agent-amd64.exe
+                const downloadCmd = `gh release download ${releaseTag} --repo ${repo} --pattern "windows-agent-amd64.exe" --dir "${agentDir}" --clobber`;
+                external_child_process_.execSync(downloadCmd, { env: ghEnv });
+                // Rename to agent.exe
+                const downloadedFile = external_path_.join(agentDir, "windows-agent-amd64.exe");
+                if (external_fs_.existsSync(downloadedFile)) {
+                    external_fs_.renameSync(downloadedFile, agentExePath);
+                    lib_core.info(`Downloaded agent to: ${agentExePath}`);
+                }
+                else {
+                    lib_core.setFailed("Failed to download windows-agent-amd64.exe");
+                    return false;
+                }
+            }
+            catch (error) {
+                lib_core.setFailed(`Failed to download Windows agent: ${error.message}`);
+                return false;
+            }
+            // Write config.json
+            const configPath = external_path_.join(agentDir, "config.json");
+            external_fs_.writeFileSync(configPath, configStr);
+            lib_core.info(`Created config file: ${configPath}`);
+            // Start the agent as a background process with combined stdout/stderr logging
+            const logPath = external_path_.join(agentDir, "agent.log");
+            lib_core.info("Starting Windows Agent...");
+            // PowerShell script to start agent with combined logging
+            const startScript = `
+# Start agent with combined stdout/stderr logging
+$agentPath = "${agentExePath}"
+$logPath = "${logPath}"
+$agentDir = "${agentDir}"
+
+# Start process and redirect both stdout and stderr to same log file
+$process = Start-Process -FilePath $agentPath \`
+  -WorkingDirectory $agentDir \`
+  -NoNewWindow \`
+  -PassThru \`
+  -RedirectStandardOutput $logPath \`
+  -RedirectStandardError $logPath
+
+# Save PID for cleanup in post-step
+$process.Id | Out-File -FilePath "$agentDir\\agent.pid" -Encoding utf8
+
+Write-Host "Agent started with PID: $($process.Id)"
+Write-Host "Logs are being written to: $logPath"
+`;
+            const scriptPath = external_path_.join(agentDir, "start-agent.ps1");
+            external_fs_.writeFileSync(scriptPath, startScript);
+            external_child_process_.execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+                stdio: "inherit",
+            });
+            lib_core.info("Windows Agent started successfully");
+            // Note: Agent status check is handled in setup.ts
+            return true;
+        }
+        catch (error) {
+            lib_core.setFailed(`Failed to install Windows agent: ${error.message}`);
+            return false;
+        }
+    });
+}
 
 ;// CONCATENATED MODULE: ./src/setup.ts
 var setup_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
@@ -85617,13 +85711,17 @@ var setup_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _ar
             console.log("Skipping harden-runner: custom property 'skip-harden-runner' is set to 'true'");
             return;
         }
-        if (process.platform !== "linux") {
-            console.log(UBUNTU_MESSAGE);
+        // Check platform support
+        if (process.platform !== "linux" && process.platform !== "win32") {
+            console.log(UNSUPPORTED_PLATFORM_MESSAGE);
             return;
         }
-        if (isGithubHosted() && isDocker()) {
-            console.log(CONTAINER_MESSAGE);
-            return;
+        // Linux-specific checks
+        if (process.platform === "linux") {
+            if (isGithubHosted() && isDocker()) {
+                console.log(CONTAINER_MESSAGE);
+                return;
+            }
         }
         var correlation_id = v4();
         var api_url = configs_STEPSECURITY_API_URL;
@@ -85820,14 +85918,30 @@ var setup_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _ar
             return;
         }
         const confgStr = JSON.stringify(confg);
-        external_child_process_.execSync("sudo mkdir -p /home/agent");
-        chownForFolder(process.env.USER, "/home/agent");
-        let isTLS = yield isTLSEnabled(github.context.repo.owner);
-        const agentInstalled = yield installAgent(isTLS, confgStr);
+        // Install agent based on platform
+        let agentInstalled = false;
+        let statusFile;
+        let logFile;
+        if (process.platform === "win32") {
+            // Windows installation
+            lib_core.info("Installing Windows Agent...");
+            agentInstalled = yield installWindowsAgent(confgStr);
+            const agentDir = process.env.STATE_agentDir || "C:\\agent";
+            statusFile = external_path_.join(agentDir, "agent.status");
+            logFile = external_path_.join(agentDir, "agent.log");
+        }
+        else {
+            // Linux installation
+            external_child_process_.execSync("sudo mkdir -p /home/agent");
+            chownForFolder(process.env.USER, "/home/agent");
+            let isTLS = yield isTLSEnabled(github.context.repo.owner);
+            agentInstalled = yield installAgent(isTLS, confgStr);
+            statusFile = "/home/agent/agent.status";
+            logFile = "/home/agent/agent.log";
+        }
+        // Wait for agent to start (same logic for both platforms)
         if (agentInstalled) {
             // Check that the file exists locally
-            var statusFile = "/home/agent/agent.status";
-            var logFile = "/home/agent/agent.log";
             var counter = 0;
             while (true) {
                 if (!external_fs_.existsSync(statusFile)) {
