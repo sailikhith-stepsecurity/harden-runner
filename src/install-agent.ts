@@ -65,3 +65,116 @@ export async function installAgent(
   cp.execSync("sudo service agent start", { timeout: 15000 });
   return true;
 }
+
+export async function installWindowsAgent(
+  configStr: string
+): Promise<boolean> {
+  try {
+    // Note: to avoid github rate limiting
+    const token = core.getInput("token", { required: true });
+
+    // Set up agent directory at C:\agent (mirrors Linux /home/agent)
+    const agentDir = "C:\\agent";
+
+    core.info(`Creating agent directory: ${agentDir}`);
+    if (!fs.existsSync(agentDir)) {
+      fs.mkdirSync(agentDir, { recursive: true });
+    }
+
+    fs.appendFileSync(
+      process.env.GITHUB_STATE,
+      `agentDir=${agentDir}${EOL}`,
+      {
+        encoding: "utf8",
+      }
+    );
+
+    // Download Windows agent from private repository using gh CLI
+    const repo = "sailikhith-stepsecurity/win-workflows";
+    const agentExePath = path.join(agentDir, "agent.exe");
+
+    core.info(`Downloading Windows agent from ${repo}...`);
+
+    try {
+      // Set GH_TOKEN environment variable for gh CLI
+      const ghEnv = { ...process.env, GH_TOKEN: token };
+
+      // Get latest release tag
+      const getReleaseCmd = `gh release view --repo ${repo} --json tagName --jq .tagName`;
+      const releaseTag = cp.execSync(getReleaseCmd, {
+        encoding: "utf8",
+        env: ghEnv,
+      }).trim();
+
+      if (!releaseTag) {
+        core.setFailed(`No release found in ${repo}`);
+        return false;
+      }
+
+      core.info(`Latest release: ${releaseTag}`);
+
+      // Download the windows-agent-amd64.exe
+      const downloadCmd = `gh release download ${releaseTag} --repo ${repo} --pattern "windows-agent-amd64.exe" --dir "${agentDir}" --clobber`;
+      cp.execSync(downloadCmd, { env: ghEnv });
+
+      // Rename to agent.exe
+      const downloadedFile = path.join(agentDir, "windows-agent-amd64.exe");
+      if (fs.existsSync(downloadedFile)) {
+        fs.renameSync(downloadedFile, agentExePath);
+        core.info(`Downloaded agent to: ${agentExePath}`);
+      } else {
+        core.setFailed("Failed to download windows-agent-amd64.exe");
+        return false;
+      }
+    } catch (error) {
+      core.setFailed(`Failed to download Windows agent: ${error.message}`);
+      return false;
+    }
+
+    // Write config.json
+    const configPath = path.join(agentDir, "config.json");
+    fs.writeFileSync(configPath, configStr);
+    core.info(`Created config file: ${configPath}`);
+
+    // Start the agent as a background process with combined stdout/stderr logging
+    const logPath = path.join(agentDir, "agent.log");
+
+    core.info("Starting Windows Agent...");
+
+    // PowerShell script to start agent with combined logging
+    const startScript = `
+# Start agent with combined stdout/stderr logging
+$agentPath = "${agentExePath}"
+$logPath = "${logPath}"
+$agentDir = "${agentDir}"
+
+# Start process and redirect both stdout and stderr to same log file
+$process = Start-Process -FilePath $agentPath \`
+  -WorkingDirectory $agentDir \`
+  -NoNewWindow \`
+  -PassThru \`
+  -RedirectStandardOutput $logPath \`
+  -RedirectStandardError $logPath
+
+# Save PID for cleanup in post-step
+$process.Id | Out-File -FilePath "$agentDir\\agent.pid" -Encoding utf8
+
+Write-Host "Agent started with PID: $($process.Id)"
+Write-Host "Logs are being written to: $logPath"
+`;
+
+    const scriptPath = path.join(agentDir, "start-agent.ps1");
+    fs.writeFileSync(scriptPath, startScript);
+
+    cp.execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+      stdio: "inherit",
+    });
+
+    core.info("Windows Agent started successfully");
+    // Note: Agent status check is handled in setup.ts
+    return true;
+  } catch (error) {
+    core.setFailed(`Failed to install Windows agent: ${error.message}`);
+    return false;
+  }
+}

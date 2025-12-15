@@ -13,13 +13,18 @@ import { context } from "@actions/github";
     return;
   }
 
-  if (process.platform !== "linux") {
-    console.log(common.UBUNTU_MESSAGE);
+  // Check platform support
+  if (process.platform !== "linux" && process.platform !== "win32") {
+    console.log(common.UNSUPPORTED_PLATFORM_MESSAGE);
     return;
   }
-  if (isGithubHosted() && isDocker()) {
-    console.log(common.CONTAINER_MESSAGE);
-    return;
+
+  // Linux-specific checks
+  if (process.platform === "linux") {
+    if (isGithubHosted() && isDocker()) {
+      console.log(common.CONTAINER_MESSAGE);
+      return;
+    }
   }
 
   if (
