@@ -172,7 +172,7 @@ export async function installWindowsAgent(configStr: string): Promise<boolean> {
   const agentExePath = path.join(agentDir, "agent.exe");
 
   const downloadPath = await tc.downloadTool(
-    `https://github.com/step-security/agent-releases/releases/download/v1.0.0-win/harden-runner-agent-windows_1.0.0_windows_amd64.tar.gz`,
+    `https://github.com/step-security/agent-int-releases/releases/download/v1.0.0-win-next/harden-runner-agent-windows_int_windows_amd64.tar.gz`,
     undefined,
     auth
   );
