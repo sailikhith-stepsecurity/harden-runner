@@ -85548,7 +85548,7 @@ const CHECKSUMS = {
     },
     darwin: "797399a3a3f6f9c4c000a02e0d8c7b16499129c9bdc2ad9cf2a10072c10654fb",
     windows: {
-        amd64: "f59960a0fe67c2b34f398b5083236a9b7287d3528681c89d7ca911ac5ccce2b0", // v1.0.0
+        amd64: "3138790aef24fb9acedd6e692f781bd7b99809c377aaf4db5048009c362a1eb0", // v1.0.0
     },
 };
 // verifyChecksum returns true if checksum is valid
