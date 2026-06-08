@@ -12,7 +12,7 @@ const CHECKSUMS = {
   },
   darwin: "797399a3a3f6f9c4c000a02e0d8c7b16499129c9bdc2ad9cf2a10072c10654fb", // v0.0.4
   windows: {
-    amd64: "b93385f96015cf07b0b10a6085e56724d9e6d2364195d5d295040eefbb2b2b05", // v1.0.0
+    amd64: "d4895513ee34e41eb9fced0376a4597cca953c07325b181653d3574330237b9f", // v1.0.0
   },
 };
 

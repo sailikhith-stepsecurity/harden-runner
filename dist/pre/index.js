@@ -85548,7 +85548,7 @@ const CHECKSUMS = {
     },
     darwin: "797399a3a3f6f9c4c000a02e0d8c7b16499129c9bdc2ad9cf2a10072c10654fb",
     windows: {
-        amd64: "b93385f96015cf07b0b10a6085e56724d9e6d2364195d5d295040eefbb2b2b05", // v1.0.0
+        amd64: "d4895513ee34e41eb9fced0376a4597cca953c07325b181653d3574330237b9f", // v1.0.0
     },
 };
 // verifyChecksum returns true if checksum is valid
@@ -85721,7 +85721,7 @@ function installWindowsAgent(configStr) {
             encoding: "utf8",
         });
         const agentExePath = external_path_.join(agentDir, "agent.exe");
-        const downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-int-releases/releases/download/v0.0.4-win/harden-runner-agent-windows_1.0.4_windows_amd64.tar.gz `, undefined, auth);
+        const downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-int-releases/releases/download/v0.0.0-win-int/agent_windows_amd64.tar.gz `, undefined, auth);
         // validate the checksum
         if (!verifyChecksum(downloadPath, false, variant, process.platform)) {
             return false;
