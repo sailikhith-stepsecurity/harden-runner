@@ -12,7 +12,7 @@ const CHECKSUMS = {
   },
   darwin: "797399a3a3f6f9c4c000a02e0d8c7b16499129c9bdc2ad9cf2a10072c10654fb", // v0.0.4
   windows: {
-    amd64: "3138790aef24fb9acedd6e692f781bd7b99809c377aaf4db5048009c362a1eb0", // v1.0.0
+    amd64: "b93385f96015cf07b0b10a6085e56724d9e6d2364195d5d295040eefbb2b2b05", // v1.0.0
   },
 };
 
@@ -21,7 +21,7 @@ export function verifyChecksum(
   downloadPath: string,
   isTLS: boolean,
   variant: string,
-  platform: string
+  platform: string,
 ) {
   const fileBuffer: Buffer = fs.readFileSync(downloadPath);
   const checksum: string = crypto
@@ -50,7 +50,7 @@ export function verifyChecksum(
 
   if (checksum !== expectedChecksum) {
     core.setFailed(
-      `❌ Checksum verification failed, expected ${expectedChecksum} instead got ${checksum}`
+      `❌ Checksum verification failed, expected ${expectedChecksum} instead got ${checksum}`,
     );
     return false;
   }
