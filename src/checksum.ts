@@ -2,15 +2,19 @@ import * as core from "@actions/core";
 import * as crypto from "crypto";
 import * as fs from "fs";
 
-const CHECKSUMS = {
+export const CHECKSUMS = {
   tls: {
-    amd64: "19c35eee1347077eb71306b122ad4a1cf83f36ef0f69fd91b0c0d79ffd0eabdd", // v1.7.10
-    arm64: "f9192788e86b2e44b795f072e8cc03eec9852649609aeedac0761d3b67c991fa",
+    amd64: "d58a9c1c5245155ce4c71507a61e213a29925a7c39c0d20bfd00bef0d281bdbb", // v1.8.6
+    arm64: "084fa95e74d17321dd1c37c93abeb8577e53ddf5266410e19f52aa79a02ae33e",
   },
   non_tls: {
-    amd64: "23715f2485c16e2a2ad116abf0fe8443788c62e4f5f224c5858b0b41b591fc89", // v0.14.3
+    amd64: "e38de61e1afd98dd339bb9acce4996183875d482be1638fb198ab02b3e25bbef", // v0.16.0
   },
-  darwin: "797399a3a3f6f9c4c000a02e0d8c7b16499129c9bdc2ad9cf2a10072c10654fb", // v0.0.4
+  bravo: {
+    amd64: "495f607a891d89f12214849301f247bdca565afe67deb170fe7e5d6d361852ca", // v1.8.6
+    arm64: "f96f66ab946097aae1fc887e12fe1cefcc5d510bce179221c7185374e4adf538",
+  },
+  darwin: "fe26a1f6af4afe9f1a854d8633832f5d18ab542827003cae445b3a64021d612c", // v0.0.5
   windows: {
     amd64: "5e70ce05b85d2e0a942eaea69b6391a103fa73fdc2fd85224bcb831b08133065", // v1.0.0
   },
@@ -22,6 +26,7 @@ export function verifyChecksum(
   isTLS: boolean,
   variant: string,
   platform: string,
+  agentType: "default" | "bravo" = "default"
 ) {
   const fileBuffer: Buffer = fs.readFileSync(downloadPath);
   const checksum: string = crypto
@@ -33,9 +38,13 @@ export function verifyChecksum(
 
   switch (platform) {
     case "linux":
-      expectedChecksum = isTLS
-        ? CHECKSUMS["tls"][variant]
-        : CHECKSUMS["non_tls"][variant];
+      if (agentType === "bravo") {
+        expectedChecksum = CHECKSUMS["bravo"][variant];
+      } else {
+        expectedChecksum = isTLS
+          ? CHECKSUMS["tls"][variant]
+          : CHECKSUMS["non_tls"][variant];
+      }
       break;
     case "darwin":
       expectedChecksum = CHECKSUMS["darwin"];

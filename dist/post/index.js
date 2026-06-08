@@ -31881,6 +31881,7 @@ var lib_core = __nccwpck_require__(7484);
 ;// CONCATENATED MODULE: ./src/configs.ts
 const STEPSECURITY_ENV = "int"; // agent or int
 const configs_STEPSECURITY_API_URL = `https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`;
+const STEPSECURITY_TELEMETRY_URL = "https://int.app-api.stepsecurity.io/v1";
 const STEPSECURITY_WEB_URL = "https://int1.stepsecurity.io";
 
 // EXTERNAL MODULE: external "child_process"
@@ -31914,6 +31915,22 @@ function isAgentInstalled(platform) {
         default:
             return false;
     }
+}
+function shouldDeployAgentOnSelfHosted(deployOnSelfHostedVm, isContainer, agentAlreadyInstalled) {
+    return deployOnSelfHostedVm && !isContainer && !agentAlreadyInstalled;
+}
+function detectThirdPartyRunnerProvider() {
+    var _a;
+    if (process.env["DEPOT_RUNNER"] === "1")
+        return "depot";
+    if (process.env["NAMESPACE_GITHUB_RUNTIME"])
+        return "namespace";
+    const runnerName = (_a = process.env["RUNNER_NAME"]) !== null && _a !== void 0 ? _a : "";
+    if (runnerName.startsWith("warp-"))
+        return "warp";
+    if (runnerName.startsWith("blacksmith-"))
+        return "blacksmith";
+    return null;
 }
 function getAnnotationLogs(platform) {
     switch (platform) {
@@ -32035,6 +32052,7 @@ const HARDEN_RUNNER_UNAVAILABLE_MESSAGE = "Sorry, we are currently experiencing 
 const ARC_RUNNER_MESSAGE = "Workflow is currently being executed in ARC based runner.";
 const ARM64_RUNNER_MESSAGE = "ARM runners are not supported in the Harden-Runner community tier.";
 const ARM64_WINDOWS_RUNNER_MESSAGE = "Windows ARM runners are not yet supported by Harden-Runner.";
+const UBUNTU_SLIM_MESSAGE = "This job is running on an ubuntu-slim runner. Harden Runner is not supported on ubuntu-slim runners. This job will not be monitored.";
 
 // EXTERNAL MODULE: external "path"
 var external_path_ = __nccwpck_require__(6928);
@@ -32197,10 +32215,15 @@ var cleanup_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _
         console.log(CONTAINER_MESSAGE);
         return;
     }
+    if (isGithubHosted() && process.platform === "linux" && !process.env.USER) {
+        console.log(UBUNTU_SLIM_MESSAGE);
+        return;
+    }
     if (isARCRunner()) {
         console.log(`[!] ${ARC_RUNNER_MESSAGE}`);
         return;
     }
+    const thirdPartyProvider = detectThirdPartyRunnerProvider();
     if (process.env.STATE_selfHosted === "true") {
         return;
     }
@@ -32214,7 +32237,12 @@ var cleanup_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _
     }
     switch (process.platform) {
         case "linux":
-            yield handleLinuxCleanup();
+            if (thirdPartyProvider) {
+                yield handleAgentBravoCleanup();
+            }
+            else {
+                yield handleLinuxCleanup();
+            }
             break;
         case "win32":
             yield handleWindowsCleanup();
@@ -32230,6 +32258,37 @@ var cleanup_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _
         console.log(exception);
     }
 }))();
+function handleAgentBravoCleanup() {
+    return cleanup_awaiter(this, void 0, void 0, function* () {
+        external_child_process_.execFileSync("/usr/bin/echo", ["step_policy_jobend"]);
+        const doneFile = "/home/agent/done.json";
+        let counter = 0;
+        while (true) {
+            if (!external_fs_.existsSync(doneFile)) {
+                counter++;
+                if (counter > 10) {
+                    console.log("timed out");
+                    break;
+                }
+                yield sleep(1000);
+            }
+            else {
+                console.log(external_fs_.readFileSync(doneFile, "utf-8"));
+                break;
+            }
+        }
+        const log = "/home/agent/agent.log";
+        if (external_fs_.existsSync(log)) {
+            console.log("log:");
+            console.log(external_fs_.readFileSync(log, "utf-8"));
+        }
+        const status = "/home/agent/agent.status";
+        if (external_fs_.existsSync(status)) {
+            console.log("status:");
+            console.log(external_fs_.readFileSync(status, "utf-8"));
+        }
+    });
+}
 function handleLinuxCleanup() {
     return cleanup_awaiter(this, void 0, void 0, function* () {
         if (process.env.STATE_isTLS === "false" && process.arch === "arm64") {

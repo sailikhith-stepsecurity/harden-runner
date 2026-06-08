@@ -31910,6 +31910,22 @@ function isAgentInstalled(platform) {
             return false;
     }
 }
+function shouldDeployAgentOnSelfHosted(deployOnSelfHostedVm, isContainer, agentAlreadyInstalled) {
+    return deployOnSelfHostedVm && !isContainer && !agentAlreadyInstalled;
+}
+function detectThirdPartyRunnerProvider() {
+    var _a;
+    if (process.env["DEPOT_RUNNER"] === "1")
+        return "depot";
+    if (process.env["NAMESPACE_GITHUB_RUNTIME"])
+        return "namespace";
+    const runnerName = (_a = process.env["RUNNER_NAME"]) !== null && _a !== void 0 ? _a : "";
+    if (runnerName.startsWith("warp-"))
+        return "warp";
+    if (runnerName.startsWith("blacksmith-"))
+        return "blacksmith";
+    return null;
+}
 function utils_getAnnotationLogs(platform) {
     switch (platform) {
         case "linux":
@@ -32030,6 +32046,7 @@ const HARDEN_RUNNER_UNAVAILABLE_MESSAGE = "Sorry, we are currently experiencing 
 const ARC_RUNNER_MESSAGE = "Workflow is currently being executed in ARC based runner.";
 const ARM64_RUNNER_MESSAGE = "ARM runners are not supported in the Harden-Runner community tier.";
 const ARM64_WINDOWS_RUNNER_MESSAGE = "Windows ARM runners are not yet supported by Harden-Runner.";
+const UBUNTU_SLIM_MESSAGE = "This job is running on an ubuntu-slim runner. Harden Runner is not supported on ubuntu-slim runners. This job will not be monitored.";
 
 ;// CONCATENATED MODULE: external "node:fs"
 const external_node_fs_namespaceObject = require("node:fs");
@@ -32067,6 +32084,7 @@ function isDocker() {
 ;// CONCATENATED MODULE: ./src/configs.ts
 const STEPSECURITY_ENV = "int"; // agent or int
 const configs_STEPSECURITY_API_URL = (/* unused pure expression or super */ null && (`https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`));
+const STEPSECURITY_TELEMETRY_URL = "https://int.app-api.stepsecurity.io/v1";
 const STEPSECURITY_WEB_URL = "https://int1.stepsecurity.io";
 
 // EXTERNAL MODULE: ./node_modules/@actions/http-client/lib/index.js
