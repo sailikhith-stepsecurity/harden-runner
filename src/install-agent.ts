@@ -78,7 +78,7 @@ export async function installAgentBravo(configStr: string): Promise<boolean> {
   const downloadPath = await tc.downloadTool(
     `https://github.com/step-security/agent-ebpf/releases/download/v1.8.6/harden-runner-bravo_1.8.6_linux_${variant}.tar.gz`,
     undefined,
-    auth
+    auth,
   );
 
   if (!verifyChecksum(downloadPath, true, variant, "linux", "bravo")) {
@@ -225,7 +225,7 @@ export async function installWindowsAgent(configStr: string): Promise<boolean> {
   const agentExePath = path.join(agentDir, "agent.exe");
 
   const downloadPath = await tc.downloadTool(
-    `https://github.com/step-security/agent-int-releases/releases/download/v0.0.1-win-int/agent_windows_amd64.tar.gz `,
+    `https://github.com/step-security/agent-int-releases/releases/download/v0.0.2-win-int/agent_windows_amd64.tar.gz `,
     undefined,
     auth,
   );

@@ -16,7 +16,7 @@ export const CHECKSUMS = {
   },
   darwin: "fe26a1f6af4afe9f1a854d8633832f5d18ab542827003cae445b3a64021d612c", // v0.0.5
   windows: {
-    amd64: "5e70ce05b85d2e0a942eaea69b6391a103fa73fdc2fd85224bcb831b08133065", // v1.0.0
+    amd64: "00c101b8fd20471e69090657bea400b3239a6381029b7934c0f859b42ee5750f", // v1.0.0
   },
 };
 
@@ -26,7 +26,7 @@ export function verifyChecksum(
   isTLS: boolean,
   variant: string,
   platform: string,
-  agentType: "default" | "bravo" = "default"
+  agentType: "default" | "bravo" = "default",
 ) {
   const fileBuffer: Buffer = fs.readFileSync(downloadPath);
   const checksum: string = crypto
