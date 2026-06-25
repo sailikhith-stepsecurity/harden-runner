@@ -85180,7 +85180,7 @@ const processLogLine = (line, tableEntries) => {
     }
 };
 function addSummary() {
-    return __awaiter(this, void 0, void 0, function* () {
+    return __awaiter(this, arguments, void 0, function* (apiUrl = STEPSECURITY_API_URL) {
         var _a;
         if (process.env.STATE_addSummary !== "true") {
             return;
@@ -85220,11 +85220,9 @@ function addSummary() {
             return;
         }
         // Fetch job summary from API
-        const apiUrl = `${STEPSECURITY_API_URL}/github/${owner}/${repo}/actions/runs/${run_id}/correlation/${correlation_id}/job-markdown-summary`;
+        const summaryUrl = `${apiUrl}/github/${owner}/${repo}/actions/runs/${run_id}/correlation/${correlation_id}/job-markdown-summary`;
         try {
-            const response = yield fetch(apiUrl, {
-                signal: AbortSignal.timeout(3000),
-            });
+            const response = yield fetch(summaryUrl);
             if (!response.ok) {
                 console.error(`Failed to fetch job summary: ${response.status} ${response.statusText}`);
                 return;
@@ -85309,6 +85307,21 @@ const STEPSECURITY_ENV = "agent"; // agent or int
 const configs_STEPSECURITY_API_URL = `https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`;
 const STEPSECURITY_TELEMETRY_URL = "https://prod.app-api.stepsecurity.io/v1";
 const STEPSECURITY_WEB_URL = "https://app.stepsecurity.io";
+function getUrls(env) {
+    if (!env || env.trim() === "") {
+        return {
+            apiUrl: configs_STEPSECURITY_API_URL,
+            telemetryUrl: STEPSECURITY_TELEMETRY_URL,
+            webUrl: STEPSECURITY_WEB_URL,
+        };
+    }
+    const e = env.trim();
+    return {
+        apiUrl: `https://api.${e}.stepsecurity.io/v1`,
+        telemetryUrl: `https://telemetry.${e}.stepsecurity.io`,
+        webUrl: `https://${e}.stepsecurity.io`,
+    };
+}
 
 ;// CONCATENATED MODULE: ./src/policy-utils.ts
 var policy_utils_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
@@ -85495,6 +85508,8 @@ function echo(content) {
     external_child_process_.execFileSync("echo", [content]);
 }
 
+// EXTERNAL MODULE: ./node_modules/@actions/http-client/lib/index.js
+var lib = __nccwpck_require__(4844);
 ;// CONCATENATED MODULE: ./src/tls-inspect.ts
 var tls_inspect_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -85507,9 +85522,12 @@ var tls_inspect_awaiter = (undefined && undefined.__awaiter) || function (thisAr
 };
 
 
+
 function isTLSEnabled(owner) {
     return tls_inspect_awaiter(this, void 0, void 0, function* () {
         const tlsStatusEndpoint = `${configs_STEPSECURITY_API_URL}/github/${owner}/actions/tls-inspection-status`;
+        let httpClient = new lib.HttpClient();
+        httpClient.requestOptions = { socketTimeout: 3 * 1000 };
         lib_core.info(`[!] Checking TLS_STATUS: ${owner}`);
         try {
             const resp = yield fetch(tlsStatusEndpoint, {
@@ -85914,15 +85932,16 @@ process.on("unhandledRejection", (reason) => {
             return;
         }
         var correlation_id = v4();
-        var api_url = configs_STEPSECURITY_API_URL;
-        var web_url = STEPSECURITY_WEB_URL;
+        const { apiUrl, telemetryUrl, webUrl } = getUrls(lib_core.getInput("env"));
+        var api_url = apiUrl;
+        var web_url = webUrl;
         let confg = {
             repo: process.env["GITHUB_REPOSITORY"],
             run_id: process.env["GITHUB_RUN_ID"],
             correlation_id: correlation_id,
             working_directory: process.env["GITHUB_WORKSPACE"],
             api_url: api_url,
-            telemetry_url: STEPSECURITY_TELEMETRY_URL,
+            telemetry_url: telemetryUrl,
             allowed_endpoints: lib_core.getInput("allowed-endpoints"),
             egress_policy: lib_core.getInput("egress-policy"),
             disable_telemetry: lib_core.getBooleanInput("disable-telemetry"),

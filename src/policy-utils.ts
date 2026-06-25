@@ -1,5 +1,5 @@
-import { PolicyResponse, Configuration } from "./interfaces";
 import { STEPSECURITY_API_URL } from "./configs";
+import { PolicyResponse, Configuration } from "./interfaces";
 
 class HttpStatusError extends Error {
   statusCode: number;

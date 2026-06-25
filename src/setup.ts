@@ -24,11 +24,7 @@ import { getCacheServiceVersion } from "@actions/cache/lib/internal/config";
 
 import * as utils from "@actions/cache/lib/internal/cacheUtils";
 import { isARCRunner, sendAllowedEndpoints } from "./arc-runner";
-import {
-  STEPSECURITY_API_URL,
-  STEPSECURITY_TELEMETRY_URL,
-  STEPSECURITY_WEB_URL,
-} from "./configs";
+import { getUrls } from "./configs";
 import { isGithubHosted, isTLSEnabled } from "./tls-inspect";
 import {
   installAgent,
@@ -82,8 +78,9 @@ process.on("unhandledRejection", (reason) => {
     }
 
     var correlation_id = uuidv4();
-    var api_url = STEPSECURITY_API_URL;
-    var web_url = STEPSECURITY_WEB_URL;
+    const { apiUrl, telemetryUrl, webUrl } = getUrls(core.getInput("env"));
+    var api_url = apiUrl;
+    var web_url = webUrl;
 
     let confg: Configuration = {
       repo: process.env["GITHUB_REPOSITORY"],
@@ -91,7 +88,7 @@ process.on("unhandledRejection", (reason) => {
       correlation_id: correlation_id,
       working_directory: process.env["GITHUB_WORKSPACE"],
       api_url: api_url,
-      telemetry_url: STEPSECURITY_TELEMETRY_URL,
+      telemetry_url: telemetryUrl,
       allowed_endpoints: core.getInput("allowed-endpoints"),
       egress_policy: core.getInput("egress-policy"),
       disable_telemetry: core.getBooleanInput("disable-telemetry"),

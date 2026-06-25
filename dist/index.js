@@ -31982,7 +31982,7 @@ const processLogLine = (line, tableEntries) => {
     }
 };
 function addSummary() {
-    return __awaiter(this, void 0, void 0, function* () {
+    return __awaiter(this, arguments, void 0, function* (apiUrl = STEPSECURITY_API_URL) {
         var _a;
         if (process.env.STATE_addSummary !== "true") {
             return;
@@ -32022,11 +32022,9 @@ function addSummary() {
             return;
         }
         // Fetch job summary from API
-        const apiUrl = `${STEPSECURITY_API_URL}/github/${owner}/${repo}/actions/runs/${run_id}/correlation/${correlation_id}/job-markdown-summary`;
+        const summaryUrl = `${apiUrl}/github/${owner}/${repo}/actions/runs/${run_id}/correlation/${correlation_id}/job-markdown-summary`;
         try {
-            const response = yield fetch(apiUrl, {
-                signal: AbortSignal.timeout(3000),
-            });
+            const response = yield fetch(summaryUrl);
             if (!response.ok) {
                 console.error(`Failed to fetch job summary: ${response.status} ${response.statusText}`);
                 return;
@@ -32087,10 +32085,27 @@ function isDocker() {
 
 ;// CONCATENATED MODULE: ./src/configs.ts
 const STEPSECURITY_ENV = "agent"; // agent or int
-const configs_STEPSECURITY_API_URL = (/* unused pure expression or super */ null && (`https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`));
+const configs_STEPSECURITY_API_URL = `https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`;
 const STEPSECURITY_TELEMETRY_URL = "https://prod.app-api.stepsecurity.io/v1";
 const STEPSECURITY_WEB_URL = "https://app.stepsecurity.io";
+function getUrls(env) {
+    if (!env || env.trim() === "") {
+        return {
+            apiUrl: configs_STEPSECURITY_API_URL,
+            telemetryUrl: STEPSECURITY_TELEMETRY_URL,
+            webUrl: STEPSECURITY_WEB_URL,
+        };
+    }
+    const e = env.trim();
+    return {
+        apiUrl: `https://api.${e}.stepsecurity.io/v1`,
+        telemetryUrl: `https://telemetry.${e}.stepsecurity.io`,
+        webUrl: `https://${e}.stepsecurity.io`,
+    };
+}
 
+// EXTERNAL MODULE: ./node_modules/@actions/http-client/lib/index.js
+var lib = __nccwpck_require__(4844);
 ;// CONCATENATED MODULE: ./src/tls-inspect.ts
 var tls_inspect_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -32103,9 +32118,12 @@ var tls_inspect_awaiter = (undefined && undefined.__awaiter) || function (thisAr
 };
 
 
+
 function isTLSEnabled(owner) {
     return tls_inspect_awaiter(this, void 0, void 0, function* () {
         const tlsStatusEndpoint = `${STEPSECURITY_API_URL}/github/${owner}/actions/tls-inspection-status`;
+        let httpClient = new HttpClient();
+        httpClient.requestOptions = { socketTimeout: 3 * 1000 };
         core.info(`[!] Checking TLS_STATUS: ${owner}`);
         try {
             const resp = yield fetch(tlsStatusEndpoint, {
@@ -32177,7 +32195,7 @@ var src_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _argu
         console.log("Telemetry will not be sent to StepSecurity API as disable-telemetry is set to true");
     }
     else {
-        var web_url = STEPSECURITY_WEB_URL;
+        var web_url = getUrls(lib_core.getInput("env")).webUrl;
         printInfo(web_url);
     }
 }))();
