@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import { STEPSECURITY_API_URL, STEPSECURITY_WEB_URL } from "./configs";
+import { STEPSECURITY_API_URL } from "./configs";
 import { getAnnotationLogs } from "./utils";
 
 export function printInfo(web_url) {
@@ -54,7 +54,7 @@ export const processLogLine = (
   }
 };
 
-export async function addSummary() {
+export async function addSummary(apiUrl: string = STEPSECURITY_API_URL) {
   if (process.env.STATE_addSummary !== "true") {
     return;
   }
@@ -106,10 +106,10 @@ export async function addSummary() {
   }
 
   // Fetch job summary from API
-  const apiUrl = `${STEPSECURITY_API_URL}/github/${owner}/${repo}/actions/runs/${run_id}/correlation/${correlation_id}/job-markdown-summary`;
+  const summaryUrl = `${apiUrl}/github/${owner}/${repo}/actions/runs/${run_id}/correlation/${correlation_id}/job-markdown-summary`;
 
   try {
-    const response = await fetch(apiUrl);
+    const response = await fetch(summaryUrl);
     if (!response.ok) {
       console.error(`Failed to fetch job summary: ${response.status} ${response.statusText}`);
       return;

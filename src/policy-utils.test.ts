@@ -20,7 +20,7 @@ test("success: fetching policy", async () => {
     .reply(200, response);
 
   let idToken = "xyz";
-  let policy = await fetchPolicy(owner, policyName, idToken);
+  let policy = await fetchPolicy(STEPSECURITY_API_URL, owner, policyName, idToken);
   console.log(policy);
   expect(policy).toStrictEqual(response);
 });
@@ -86,7 +86,7 @@ test("merge configs", async () => {
 // ==================== additional fetchPolicy tests ====================
 
 test("fetchPolicy throws when idToken is empty", async () => {
-  await expect(fetchPolicy("owner", "policy1", "")).rejects.toThrow(
+  await expect(fetchPolicy(STEPSECURITY_API_URL, "owner", "policy1", "")).rejects.toThrow(
     "[PolicyFetch]: id-token in empty"
   );
 });
@@ -106,7 +106,7 @@ test("fetchPolicy retries on failure and succeeds", async () => {
     .get(`/github/${owner}/actions/policies/${policyName}`)
     .reply(200, response);
 
-  const policy = await fetchPolicy(owner, policyName, "token123");
+  const policy = await fetchPolicy(STEPSECURITY_API_URL, owner, policyName, "token123");
   expect(policy).toStrictEqual(response);
 });
 
@@ -120,7 +120,7 @@ test("fetchPolicy throws after all retries exhausted", async () => {
     .replyWithError("connection timeout");
 
   await expect(
-    fetchPolicy(owner, policyName, "token123")
+    fetchPolicy(STEPSECURITY_API_URL, owner, policyName, "token123")
   ).rejects.toThrow("[Policy Fetch]");
 });
 
@@ -137,7 +137,7 @@ test("fetchPolicy preserves statusCode from error", async () => {
     .replyWithError(errorWithStatus);
 
   try {
-    await fetchPolicy(owner, policyName, "token123");
+    await fetchPolicy(STEPSECURITY_API_URL, owner, policyName, "token123");
     fail("should have thrown");
   } catch (err) {
     expect(err.message).toContain("[Policy Fetch]");
@@ -168,13 +168,13 @@ test("success: fetches policy from store", async () => {
     .get(`/github/${owner}/${repo}/actions/policies/workflow-policy?${policyStoreQueryString(workflow, runId, correlationId)}`)
     .reply(200, response);
 
-  const result = await fetchPolicyFromStore(owner, repo, "my-api-key", workflow, runId, correlationId);
+  const result = await fetchPolicyFromStore(STEPSECURITY_API_URL, owner, repo, "my-api-key", workflow, runId, correlationId);
   expect(result).toStrictEqual(response);
 });
 
 test("fetchPolicyFromStore throws when apiKey is empty", async () => {
   await expect(
-    fetchPolicyFromStore("owner", "repo", "", "ci.yml", "123", "abc")
+    fetchPolicyFromStore(STEPSECURITY_API_URL, "owner", "repo", "", "ci.yml", "123", "abc")
   ).rejects.toThrow("[PolicyStoreFetch]: api-key is empty");
 });
 
@@ -189,7 +189,7 @@ test("fetchPolicyFromStore returns null when policy not found (404)", async () =
     .get(`/github/${owner}/${repo}/actions/policies/workflow-policy?${policyStoreQueryString(workflow, runId, correlationId)}`)
     .reply(404, { message: "not found" });
 
-  const result = await fetchPolicyFromStore(owner, repo, "my-api-key", workflow, runId, correlationId);
+  const result = await fetchPolicyFromStore(STEPSECURITY_API_URL, owner, repo, "my-api-key", workflow, runId, correlationId);
   expect(result).toBeNull();
 });
 
@@ -204,7 +204,7 @@ test("fetchPolicyFromStore returns null when API returns empty policy", async ()
     .get(`/github/${owner}/${repo}/actions/policies/workflow-policy?${policyStoreQueryString(workflow, runId, correlationId)}`)
     .reply(200, { allowed_endpoints: [], egress_policy: "", policy_name: "" });
 
-  const result = await fetchPolicyFromStore(owner, repo, "my-api-key", workflow, runId, correlationId);
+  const result = await fetchPolicyFromStore(STEPSECURITY_API_URL, owner, repo, "my-api-key", workflow, runId, correlationId);
   expect(result).toBeNull();
 });
 
@@ -226,7 +226,7 @@ test("fetchPolicyFromStore retries on failure and succeeds", async () => {
     .get(`/github/${owner}/${repo}/actions/policies/workflow-policy?${policyStoreQueryString(workflow, runId, correlationId)}`)
     .reply(200, response);
 
-  const result = await fetchPolicyFromStore(owner, repo, "my-api-key", workflow, runId, correlationId);
+  const result = await fetchPolicyFromStore(STEPSECURITY_API_URL, owner, repo, "my-api-key", workflow, runId, correlationId);
   expect(result).toStrictEqual(response);
 });
 
@@ -243,7 +243,7 @@ test("fetchPolicyFromStore throws after all retries exhausted", async () => {
     .replyWithError("connection refused");
 
   await expect(
-    fetchPolicyFromStore(owner, repo, "my-api-key", workflow, runId, correlationId)
+    fetchPolicyFromStore(STEPSECURITY_API_URL, owner, repo, "my-api-key", workflow, runId, correlationId)
   ).rejects.toThrow("[Policy Store Fetch]");
 });
 
@@ -263,7 +263,7 @@ test("fetchPolicyFromStore preserves statusCode from error", async () => {
     .replyWithError(errorWithStatus);
 
   try {
-    await fetchPolicyFromStore(owner, repo, "my-api-key", workflow, runId, correlationId);
+    await fetchPolicyFromStore(STEPSECURITY_API_URL, owner, repo, "my-api-key", workflow, runId, correlationId);
     fail("should have thrown");
   } catch (err) {
     expect(err.message).toContain("[Policy Store Fetch]");
@@ -287,7 +287,7 @@ test("fetchPolicyFromStore sends correct authorization header", async () => {
     .get(`/github/${owner}/${repo}/actions/policies/workflow-policy?${policyStoreQueryString(workflow, runId, correlationId)}`)
     .reply(200, { allowed_endpoints: [], egress_policy: "audit" });
 
-  const result = await fetchPolicyFromStore(owner, repo, apiKey, workflow, runId, correlationId);
+  const result = await fetchPolicyFromStore(STEPSECURITY_API_URL, owner, repo, apiKey, workflow, runId, correlationId);
   expect(result).toStrictEqual({
     allowed_endpoints: [],
     egress_policy: "audit",

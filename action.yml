@@ -44,6 +44,10 @@ inputs:
     description: "Set to true to deploy the Harden Runner agent directly on a self-hosted runner VM (Linux only). The recommended approach for self-hosted VMs is to bake the agent into the VM image; see docs.stepsecurity.io. Use this option only if baking is not possible, and only for ephemeral runners."
     required: false
     default: "false"
+  env:
+    description: "Custom environment name used to derive StepSecurity service URLs (e.g., 'company' resolves to api.company.stepsecurity.io, telemetry.company.stepsecurity.io, company.stepsecurity.io). Leave empty to use the default StepSecurity endpoints."
+    required: false
+    default: ""
 
 branding:
   icon: "check-square"

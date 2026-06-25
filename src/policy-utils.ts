@@ -1,8 +1,8 @@
 import { HttpClient } from "@actions/http-client";
 import { PolicyResponse, Configuration } from "./interfaces";
-import { STEPSECURITY_API_URL } from "./configs";
 
 export async function fetchPolicy(
+  apiUrl: string,
   owner: string,
   policyName: string,
   idToken: string
@@ -11,7 +11,7 @@ export async function fetchPolicy(
     throw new Error("[PolicyFetch]: id-token in empty");
   }
 
-  let policyEndpoint = `${STEPSECURITY_API_URL}/github/${owner}/actions/policies/${policyName}`;
+  let policyEndpoint = `${apiUrl}/github/${owner}/actions/policies/${policyName}`;
 
   let httpClient = new HttpClient();
 
@@ -51,6 +51,7 @@ export async function fetchPolicy(
 }
 
 export async function fetchPolicyFromStore(
+  apiUrl: string,
   owner: string,
   repo: string,
   apiKey: string,
@@ -62,7 +63,7 @@ export async function fetchPolicyFromStore(
     throw new Error("[PolicyStoreFetch]: api-key is empty");
   }
 
-  let policyEndpoint = `${STEPSECURITY_API_URL}/github/${owner}/${repo}/actions/policies/workflow-policy?workflow=${encodeURIComponent(workflow)}&run_id=${encodeURIComponent(runId)}&correlationId=${encodeURIComponent(correlationId)}`;
+  let policyEndpoint = `${apiUrl}/github/${owner}/${repo}/actions/policies/workflow-policy?workflow=${encodeURIComponent(workflow)}&run_id=${encodeURIComponent(runId)}&correlationId=${encodeURIComponent(correlationId)}`;
 
   let httpClient = new HttpClient();
 

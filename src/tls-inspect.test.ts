@@ -10,7 +10,7 @@ test("tls-inspect enabled", async () => {
     .get(`/github/${owner}/actions/tls-inspection-status`)
     .reply(200, "");
 
-  let got = await isTLSEnabled(owner);
+  let got = await isTLSEnabled(owner, STEPSECURITY_API_URL);
 
   expect(got).toEqual(expected);
 });
@@ -23,7 +23,7 @@ test("tls-inspect not enabled", async () => {
     .get(`/github/${owner}/actions/tls-inspection-status`)
     .reply(401, "");
 
-  let got = await isTLSEnabled(owner);
+  let got = await isTLSEnabled(owner, STEPSECURITY_API_URL);
 
   expect(got).toEqual(expected);
 });

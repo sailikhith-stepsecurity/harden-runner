@@ -1,5 +1,7 @@
+import * as core from "@actions/core";
 import * as fs from "fs";
 import * as common from "./common";
+import { getUrls } from "./configs";
 import * as cp from "child_process";
 import * as path from "path";
 import isDocker from "is-docker";
@@ -71,7 +73,8 @@ import { isPlatformSupported, isAgentInstalled, detectThirdPartyRunnerProvider }
   }
 
   try {
-    await common.addSummary();
+    const { apiUrl } = getUrls(core.getInput("env"));
+    await common.addSummary(apiUrl);
   } catch (exception) {
     console.log(exception);
   }

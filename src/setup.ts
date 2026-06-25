@@ -25,11 +25,7 @@ import { getCacheServiceVersion } from "@actions/cache/lib/internal/config";
 
 import * as utils from "@actions/cache/lib/internal/cacheUtils";
 import { isARCRunner, sendAllowedEndpoints } from "./arc-runner";
-import {
-  STEPSECURITY_API_URL,
-  STEPSECURITY_TELEMETRY_URL,
-  STEPSECURITY_WEB_URL,
-} from "./configs";
+import { getUrls } from "./configs";
 import { isGithubHosted, isTLSEnabled } from "./tls-inspect";
 import {
   installAgent,
@@ -72,8 +68,9 @@ interface MonitorResponse {
     }
 
     var correlation_id = uuidv4();
-    var api_url = STEPSECURITY_API_URL;
-    var web_url = STEPSECURITY_WEB_URL;
+    const { apiUrl, telemetryUrl, webUrl } = getUrls(core.getInput("env"));
+    var api_url = apiUrl;
+    var web_url = webUrl;
 
     let confg: Configuration = {
       repo: process.env["GITHUB_REPOSITORY"],
@@ -81,7 +78,7 @@ interface MonitorResponse {
       correlation_id: correlation_id,
       working_directory: process.env["GITHUB_WORKSPACE"],
       api_url: api_url,
-      telemetry_url: STEPSECURITY_TELEMETRY_URL,
+      telemetry_url: telemetryUrl,
       allowed_endpoints: core.getInput("allowed-endpoints"),
       egress_policy: core.getInput("egress-policy"),
       disable_telemetry: core.getBooleanInput("disable-telemetry"),
@@ -117,6 +114,7 @@ interface MonitorResponse {
           const workflowRef = process.env["GITHUB_WORKFLOW_REF"] || "";
           const workflow = workflowRef.replace(/.*\.github\/workflows\//, "").replace(/@.*/, "");
           let result: PolicyResponse | null = await fetchPolicyFromStore(
+            apiUrl,
             context.repo.owner,
             repoName,
             confg.api_key,
@@ -147,6 +145,7 @@ interface MonitorResponse {
       try {
         let idToken: string = await core.getIDToken();
         let result: PolicyResponse = await fetchPolicy(
+          apiUrl,
           context.repo.owner,
           policyName,
           idToken
@@ -433,7 +432,7 @@ interface MonitorResponse {
         cp.execSync("sudo mkdir -p /home/agent");
         chownForFolder(process.env.USER, "/home/agent");
 
-        let isTLS = await isTLSEnabled(context.repo.owner);
+        let isTLS = await isTLSEnabled(context.repo.owner, apiUrl);
         agentInstalled = await installAgent(isTLS, configStr);
 
         break;
@@ -526,7 +525,7 @@ export async function installAgentForSelfHosted(owner: string, confg: Configurat
   try {
     console.log("Installing Harden Runner agent for self-hosted runner");
 
-    let isTLS = await isTLSEnabled(owner);
+    let isTLS = await isTLSEnabled(owner, confg.api_url);
 
     if (!isTLS) {
       console.log("TLS is not enabled for this organization. Agent installation skipped for self-hosted runner.");
@@ -585,7 +584,7 @@ export async function installAgentForBravo(owner: string, confg: Configuration) 
   try {
     console.log("Installing Harden Runner bravo agent for third-party runner");
 
-    let isTLS = await isTLSEnabled(owner);
+    let isTLS = await isTLSEnabled(owner, confg.api_url);
 
     if (!isTLS) {
       console.log("TLS is not enabled for this organization. Bravo agent installation skipped.");

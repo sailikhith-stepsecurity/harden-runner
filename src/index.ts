@@ -1,7 +1,7 @@
 import * as common from "./common";
 import * as core from "@actions/core";
 import isDocker from "is-docker";
-import { STEPSECURITY_WEB_URL } from "./configs";
+import { getUrls } from "./configs";
 import { isGithubHosted } from "./tls-inspect";
 import { context } from "@actions/github";
 import { isPlatformSupported } from "./utils";
@@ -44,7 +44,7 @@ import { isPlatformSupported } from "./utils";
       "Telemetry will not be sent to StepSecurity API as disable-telemetry is set to true"
     );
   } else {
-    var web_url = STEPSECURITY_WEB_URL;
+    var web_url = getUrls(core.getInput("env")).webUrl;
     common.printInfo(web_url);
   }
 })();
