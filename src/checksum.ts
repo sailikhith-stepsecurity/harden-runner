@@ -16,7 +16,7 @@ export const CHECKSUMS = {
   },
   darwin: "fe26a1f6af4afe9f1a854d8633832f5d18ab542827003cae445b3a64021d612c", // v0.0.5
   windows: {
-    amd64: "77233e2755f8e5886dd5a16957ec92cc5504a7d6f23774792f0509fb797cbecc", // v1.0.2
+    amd64: "6f3df4e962b776808ad62cf68043ae68c1d1c447a9fb400f3a5546a3f42a3b87", // v1.0.2
   },
 };
 
