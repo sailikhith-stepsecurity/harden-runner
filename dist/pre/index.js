@@ -85627,7 +85627,7 @@ const CHECKSUMS = {
     },
     darwin: "fe26a1f6af4afe9f1a854d8633832f5d18ab542827003cae445b3a64021d612c",
     windows: {
-        amd64: "ac3f979f45b0f00fc3089b909860ee80b29b6b2743831e59aa6aebbbee47be84", // v1.0.2
+        amd64: "75ce6d4462eb02fe288acb3f97c10bb113a3def85bea1474bf6c2877f036f671", // v1.0.2
     },
 };
 // verifyChecksum returns true if checksum is valid
@@ -85850,7 +85850,7 @@ function installWindowsAgent(configStr) {
             encoding: "utf8",
         });
         const agentExePath = external_path_.join(agentDir, "agent.exe");
-        const downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-int-releases/releases/download/v0.0.3-win-int/agent_windows_amd64.tar.gz`, undefined, auth);
+        const downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-int-releases/releases/download/v0.0.4-win-int/agent_windows_amd64.tar.gz `, undefined, auth);
         // validate the checksum
         if (!verifyChecksum(downloadPath, false, variant, process.platform)) {
             return false;
