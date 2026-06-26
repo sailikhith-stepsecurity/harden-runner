@@ -80,7 +80,7 @@ process.on("unhandledRejection", (reason) => {
   }
 
   try {
-    const { apiUrl } = getUrls(core.getInput("env"));
+    const { apiUrl } = getUrls(core.getInput("environment"));
     await common.addSummary(apiUrl);
   } catch (exception) {
     console.log(exception);

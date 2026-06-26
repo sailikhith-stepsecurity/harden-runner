@@ -32277,7 +32277,7 @@ process.on("unhandledRejection", (reason) => {
             break;
     }
     try {
-        const { apiUrl } = getUrls(lib_core.getInput("env"));
+        const { apiUrl } = getUrls(lib_core.getInput("environment"));
         yield addSummary(apiUrl);
     }
     catch (exception) {

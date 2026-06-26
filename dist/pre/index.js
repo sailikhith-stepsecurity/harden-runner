@@ -85932,7 +85932,7 @@ process.on("unhandledRejection", (reason) => {
             return;
         }
         var correlation_id = v4();
-        const { apiUrl, telemetryUrl, webUrl } = getUrls(lib_core.getInput("env"));
+        const { apiUrl, telemetryUrl, webUrl } = getUrls(lib_core.getInput("environment"));
         var api_url = apiUrl;
         var web_url = webUrl;
         let confg = {
