@@ -85560,7 +85560,7 @@ function getUrls(env) {
     const e = env.trim();
     return {
         apiUrl: `https://api.${e}.stepsecurity.io/v1`,
-        telemetryUrl: `https://telemetry.${e}.stepsecurity.io`,
+        telemetryUrl: `https://telemetry.${e}.stepsecurity.io/v1`,
         webUrl: `https://${e}.stepsecurity.io`,
     };
 }
