@@ -44,7 +44,7 @@ import { isPlatformSupported } from "./utils";
       "Telemetry will not be sent to StepSecurity API as disable-telemetry is set to true"
     );
   } else {
-    var web_url = getUrls(core.getInput("env")).webUrl;
+    var web_url = getUrls(core.getInput("environment")).webUrl;
     common.printInfo(web_url);
   }
 })();

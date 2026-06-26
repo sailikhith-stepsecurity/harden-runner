@@ -68,7 +68,7 @@ interface MonitorResponse {
     }
 
     var correlation_id = uuidv4();
-    const { apiUrl, telemetryUrl, webUrl } = getUrls(core.getInput("env"));
+    const { apiUrl, telemetryUrl, webUrl } = getUrls(core.getInput("environment"));
     var api_url = apiUrl;
     var web_url = webUrl;
 

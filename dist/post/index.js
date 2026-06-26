@@ -32268,7 +32268,7 @@ var cleanup_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _
             break;
     }
     try {
-        const { apiUrl } = getUrls(lib_core.getInput("env"));
+        const { apiUrl } = getUrls(lib_core.getInput("environment"));
         yield addSummary(apiUrl);
     }
     catch (exception) {
