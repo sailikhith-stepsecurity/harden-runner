@@ -86306,6 +86306,8 @@ process.on("unhandledRejection", (reason) => {
         let statusFile = "";
         let logFile = "";
         let agentInstalled = false;
+        // How long to wait for the agent to write agent.status.
+        let statusTimeoutMs = 9000;
         switch (process.platform) {
             case "linux":
                 statusFile = "/home/agent/agent.status";
@@ -86321,6 +86323,8 @@ process.on("unhandledRejection", (reason) => {
                 const agentDir = process.env.STATE_agentDir || "C:\\agent";
                 statusFile = external_path_.join(agentDir, "agent.status");
                 logFile = external_path_.join(agentDir, "agent.log");
+                // The service is started via SCM, so it needs longer to come up.
+                statusTimeoutMs = 20000;
                 break;
             case "darwin":
                 const installed = yield installMacosAgent(configStr);
@@ -86332,11 +86336,13 @@ process.on("unhandledRejection", (reason) => {
                 throw new Error(`Setup failed because of unsupported platform: ${process.platform}`);
         }
         if (agentInstalled) {
+            const pollIntervalMs = 300;
+            const maxAttempts = Math.ceil(statusTimeoutMs / pollIntervalMs);
             var counter = 0;
             while (true) {
                 if (!external_fs_.existsSync(statusFile)) {
                     counter++;
-                    if (counter > 30) {
+                    if (counter > maxAttempts) {
                         console.log("timed out");
                         if (external_fs_.existsSync(logFile)) {
                             var content = external_fs_.readFileSync(logFile, "utf-8");
@@ -86344,7 +86350,7 @@ process.on("unhandledRejection", (reason) => {
                         }
                         break;
                     }
-                    yield setup_sleep(300);
+                    yield setup_sleep(pollIntervalMs);
                 } // The file *does* exist
                 else {
                     // Read the file
