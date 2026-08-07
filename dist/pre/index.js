@@ -85400,10 +85400,10 @@ function isValidEvent() {
 }
 
 ;// CONCATENATED MODULE: ./src/configs.ts
-const STEPSECURITY_ENV = "agent"; // agent or int
+const STEPSECURITY_ENV = "int"; // agent or int
 const configs_STEPSECURITY_API_URL = `https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`;
-const STEPSECURITY_TELEMETRY_URL = "https://prod.app-api.stepsecurity.io/v1";
-const STEPSECURITY_WEB_URL = "https://app.stepsecurity.io";
+const STEPSECURITY_TELEMETRY_URL = "https://int.app-api.stepsecurity.io/v1";
+const STEPSECURITY_WEB_URL = "https://int1.stepsecurity.io";
 
 ;// CONCATENATED MODULE: ./src/policy-utils.ts
 var policy_utils_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
@@ -85650,7 +85650,7 @@ const CHECKSUMS = {
     },
     darwin: "2990f0390d2760fa6262a3830060b6db1233f16a1410ffe1ed2bf13dfda80c38", // v0.0.6
     windows: {
-        amd64: "5e3604d08aba65d7bdd1d0684826d5894ffb0c6f56b914c6ecb35c3271e04483", // v1.0.7
+        amd64: "615eba9aac8ac014b53e025246e3ebdc6d847138067dadb7db4350369a6fd8e3", // v1.0.0
     },
 };
 // verifyChecksum returns true if checksum is valid
@@ -85873,7 +85873,7 @@ function installWindowsAgent(configStr) {
             encoding: "utf8",
         });
         const agentExePath = external_path_.join(agentDir, "agent.exe");
-        const downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-releases/releases/download/v1.0.7-win/harden-runner-agent-windows_1.0.7_windows_amd64.tar.gz`, undefined, auth);
+        const downloadPath = yield tool_cache.downloadTool(`https://github.com/sailikhith-stepsecurity/poc-1/releases/download/v0.0.1/harden-runner-agent-windows_1.0.8-SNAPSHOT-9b92481_windows_amd64.tar.gz`, undefined, auth);
         // validate the checksum
         if (!verifyChecksum(downloadPath, false, variant, process.platform)) {
             return false;

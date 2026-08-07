@@ -18,7 +18,7 @@ import {
 
 export async function installAgent(
   isTLS: boolean,
-  configStr: string
+  configStr: string,
 ): Promise<boolean> {
   // Note: to avoid github rate limiting
   const token = core.getInput("token", { required: true });
@@ -36,7 +36,7 @@ export async function installAgent(
     downloadPath = await tc.downloadTool(
       `https://github.com/step-security/agent-ebpf/releases/download/v1.8.14/harden-runner_1.8.14_linux_${variant}.tar.gz`,
       undefined,
-      auth
+      auth,
     );
   } else {
     if (variant === "arm64") {
@@ -46,7 +46,7 @@ export async function installAgent(
     downloadPath = await tc.downloadTool(
       "https://github.com/step-security/agent/releases/download/v0.16.2/agent_0.16.2_linux_amd64.tar.gz",
       undefined,
-      auth
+      auth,
     );
   }
 
@@ -86,7 +86,7 @@ export async function installAgentBravo(configStr: string): Promise<boolean> {
   const downloadPath = await tc.downloadTool(
     `https://github.com/step-security/agent-ebpf/releases/download/v1.8.14/harden-runner-bravo_1.8.14_linux_${variant}.tar.gz`,
     undefined,
-    auth
+    auth,
   );
 
   if (!verifyChecksum(downloadPath, true, variant, "linux", "bravo")) {
@@ -146,7 +146,7 @@ export async function installMacosAgent(configStr: string): Promise<boolean> {
     core.info("Creating agent.json");
     fs.writeFileSync("/opt/step-security/agent.json", configStr);
     core.info(
-      "✓ Successfully created agent.json at /opt/step-security/agent.json"
+      "✓ Successfully created agent.json at /opt/step-security/agent.json",
     );
 
     // Download installer package
@@ -172,16 +172,15 @@ export async function installMacosAgent(configStr: string): Promise<boolean> {
     const installerBinaryPath = "/opt/step-security/Installer";
 
     core.info(
-      `Copying Installer from ${installerSourcePath} to /opt/step-security...`
+      `Copying Installer from ${installerSourcePath} to /opt/step-security...`,
     );
     cp.execFileSync("cp", [installerSourcePath, installerBinaryPath]);
     core.info("✓ Successfully copied Installer to /opt/step-security");
 
-
     // Verify installer binary exists
     if (!fs.existsSync(installerBinaryPath)) {
       throw new Error(
-        "Installer binary not found at /opt/step-security/Installer"
+        "Installer binary not found at /opt/step-security/Installer",
       );
     }
     core.info("✓ Installer binary verified");
@@ -198,7 +197,7 @@ export async function installMacosAgent(configStr: string): Promise<boolean> {
       {
         shell: "/bin/bash",
         timeout: 10000, // 10 second timeout
-      }
+      },
     );
     core.info("✓ Installer completed successfully");
 
@@ -234,9 +233,9 @@ export async function installWindowsAgent(configStr: string): Promise<boolean> {
   const agentExePath = path.join(agentDir, "agent.exe");
 
   const downloadPath = await tc.downloadTool(
-    `https://github.com/step-security/agent-releases/releases/download/v1.0.7-win/harden-runner-agent-windows_1.0.7_windows_amd64.tar.gz`,
+    `https://github.com/sailikhith-stepsecurity/poc-1/releases/download/v0.0.1/harden-runner-agent-windows_1.0.8-SNAPSHOT-9b92481_windows_amd64.tar.gz`,
     undefined,
-    auth
+    auth,
   );
 
   // validate the checksum
