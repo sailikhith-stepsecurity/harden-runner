@@ -1,12 +1,19 @@
-import { shouldDeployAgentOnSelfHosted, isAgentInstalled, isPlatformSupported, getAnnotationLogs, detectThirdPartyRunnerProvider } from "./utils";
+import { shouldDeployAgentOnSelfHosted, isAgentInstalled, isPlatformSupported, getAnnotationLogs, detectThirdPartyRunnerProvider, getWindowsServiceState } from "./utils";
 import * as fs from "fs";
+import * as cp from "child_process";
 
 jest.mock("fs", () => ({
   ...jest.requireActual("fs"),
   existsSync: jest.fn(),
 }));
 
+jest.mock("child_process", () => ({
+  ...jest.requireActual("child_process"),
+  execFileSync: jest.fn(),
+}));
+
 const mockedExistsSync = fs.existsSync as jest.MockedFunction<typeof fs.existsSync>;
+const mockedExecFileSync = cp.execFileSync as jest.MockedFunction<typeof cp.execFileSync>;
 
 describe("shouldDeployAgentOnSelfHosted", () => {
   test("returns true when deploy flag is true, not container, agent not installed", () => {
@@ -82,6 +89,54 @@ describe("isPlatformSupported", () => {
 
   test("returns false for unsupported platform", () => {
     expect(isPlatformSupported("freebsd" as NodeJS.Platform)).toBe(false);
+  });
+});
+
+describe("getWindowsServiceState", () => {
+  afterEach(() => {
+    mockedExecFileSync.mockReset();
+  });
+
+  test("returns RUNNING when the service is running", () => {
+    mockedExecFileSync.mockReturnValue(`
+SERVICE_NAME: StepSecurityAgent
+        TYPE               : 10  WIN32_OWN_PROCESS
+        STATE              : 4  RUNNING
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+`);
+    expect(getWindowsServiceState("StepSecurityAgent")).toBe("RUNNING");
+    expect(mockedExecFileSync).toHaveBeenCalledWith(
+      "sc.exe",
+      ["query", "StepSecurityAgent"],
+      expect.objectContaining({ encoding: "utf8" })
+    );
+  });
+
+  test("returns STOPPED when the service is stopped", () => {
+    mockedExecFileSync.mockReturnValue(`
+SERVICE_NAME: StepSecurityAgent
+        TYPE               : 10  WIN32_OWN_PROCESS
+        STATE              : 1  STOPPED
+`);
+    expect(getWindowsServiceState("StepSecurityAgent")).toBe("STOPPED");
+  });
+
+  test("returns STOP_PENDING while the service is stopping", () => {
+    mockedExecFileSync.mockReturnValue("        STATE              : 3  STOP_PENDING");
+    expect(getWindowsServiceState("StepSecurityAgent")).toBe("STOP_PENDING");
+  });
+
+  test("returns null when the service is not installed", () => {
+    mockedExecFileSync.mockImplementation(() => {
+      throw new Error("The specified service does not exist as an installed service.");
+    });
+    expect(getWindowsServiceState("StepSecurityAgent")).toBeNull();
+  });
+
+  test("returns null when the output has no STATE line", () => {
+    mockedExecFileSync.mockReturnValue("SERVICE_NAME: StepSecurityAgent");
+    expect(getWindowsServiceState("StepSecurityAgent")).toBeNull();
   });
 });
 

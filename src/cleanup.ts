@@ -7,7 +7,7 @@ import isDocker from "is-docker";
 import { isARCRunner } from "./arc-runner";
 import { isGithubHosted } from "./tls-inspect";
 import { context } from "@actions/github";
-import { isPlatformSupported, isAgentInstalled, detectThirdPartyRunnerProvider } from "./utils";
+import { isPlatformSupported, isAgentInstalled, detectThirdPartyRunnerProvider, getWindowsServiceState, removeWindowsService } from "./utils";
 
 // See setup.ts for rationale — Node 22+ kills the process on unhandled rejections.
 process.on("unhandledRejection", (reason) => {
@@ -319,54 +319,24 @@ async function handleWindowsCleanup() {
     }
   }
 
-  console.log("stopping windows agent process...");
-  const pidFile = path.join(agentDir, "agent.pid");
+  console.log(`stopping ${common.WINDOWS_SERVICE_NAME} service...`);
 
+  // Note: do not return early from here on, so the agent log below is always
+  // printed — it is the main debugging surface for Windows runs.
   try {
-    if (!fs.existsSync(pidFile)) {
-      console.log("PID file not found. Agent may not be running.");
-      return;
-    }
-
-    const pid = parseInt(fs.readFileSync(pidFile, "utf8").trim());
-    console.log(`agent PID from file: ${pid}`);
-
-    try {
-      process.kill(pid, 0); // signal 0 just checks if process exists
-    } catch {
-      console.log("agent process not running.");
-      fs.unlinkSync(pidFile);
-      return;
-    }
-
-    console.log(`stopping agent process (PID: ${pid})...`);
-    process.kill(pid, "SIGINT");
-
-    let gracefulShutdown = false;
-    for (let i = 0; i < 10; i++) {
-      await sleep(1000);
-
-      try {
-        process.kill(pid, 0); // check if still exists
-      } catch {
-        gracefulShutdown = true;
-        console.log("agent process stopped gracefully");
-        break;
-      }
-    }
-
-    if (!gracefulShutdown) {
-      console.log("graceful shutdown timeout (10s), forcing termination...");
-      process.kill(pid, "SIGKILL");
-      console.log("agent process terminated forcefully");
-    }
-
-    if (fs.existsSync(pidFile)) {
-      fs.unlinkSync(pidFile);
-      console.log("PID file cleaned up");
+    if (getWindowsServiceState(common.WINDOWS_SERVICE_NAME) === null) {
+      console.log(
+        `${common.WINDOWS_SERVICE_NAME} service not found; nothing to remove.`
+      );
+    } else {
+      await removeWindowsService(common.WINDOWS_SERVICE_NAME);
+      console.log(`${common.WINDOWS_SERVICE_NAME} service stopped and deleted`);
     }
   } catch (error) {
-    console.log("warning: error stopping agent process:", error.message);
+    console.log(
+      `warning: error removing ${common.WINDOWS_SERVICE_NAME} service:`,
+      error.message
+    );
   }
 
   const log = path.join(agentDir, "agent.log");
