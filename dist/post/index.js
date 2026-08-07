@@ -31889,6 +31889,15 @@ var external_child_process_ = __nccwpck_require__(5317);
 // EXTERNAL MODULE: external "os"
 var external_os_ = __nccwpck_require__(857);
 ;// CONCATENATED MODULE: ./src/utils.ts
+var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 
 
 
@@ -31957,6 +31966,68 @@ function detectThirdPartyRunnerProvider() {
         return "blacksmith";
     return null;
 }
+// Returns the SCM state of a Windows service ("RUNNING", "STOPPED",
+// "STOP_PENDING", ...), or null when the service is not installed. sc.exe
+// exits non-zero with error 1060 in that case, which is not an error here.
+function getWindowsServiceState(name) {
+    try {
+        const output = external_child_process_.execFileSync("sc.exe", ["query", name], {
+            encoding: "utf8",
+            windowsHide: true,
+        });
+        const match = output.match(/STATE\s+:\s+\d+\s+(\w+)/);
+        return match ? match[1] : null;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+// Stops and deletes a Windows service, waiting for each transition to settle.
+// Never throws; a failure here should not fail the job.
+function removeWindowsService(name) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (getWindowsServiceState(name) === null) {
+            return;
+        }
+        try {
+            external_child_process_.execFileSync("sc.exe", ["stop", name], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            // Already stopped (or stopping) exits non-zero; the poll below settles it.
+            console.log(`sc.exe stop ${name}: ${error.message}`);
+        }
+        for (let i = 0; i < 20; i++) {
+            const state = getWindowsServiceState(name);
+            if (state === null || state === "STOPPED") {
+                break;
+            }
+            yield serviceSleep(500);
+        }
+        try {
+            external_child_process_.execFileSync("sc.exe", ["delete", name], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            console.log(`sc.exe delete ${name}: ${error.message}`);
+            return;
+        }
+        // Wait for DELETE_PENDING to clear so a subsequent create does not fail.
+        for (let i = 0; i < 10; i++) {
+            if (getWindowsServiceState(name) === null) {
+                break;
+            }
+            yield serviceSleep(500);
+        }
+    });
+}
+function serviceSleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 function getAnnotationLogs(platform) {
     switch (platform) {
         case "linux":
@@ -31971,7 +32042,7 @@ function getAnnotationLogs(platform) {
 }
 
 ;// CONCATENATED MODULE: ./src/common.ts
-var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var common_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -32011,7 +32082,7 @@ const processLogLine = (line, tableEntries) => {
     }
 };
 function addSummary() {
-    return __awaiter(this, void 0, void 0, function* () {
+    return common_awaiter(this, void 0, void 0, function* () {
         var _a;
         if (process.env.STATE_addSummary !== "true") {
             return;
@@ -32072,6 +32143,9 @@ function addSummary() {
     });
 }
 const STATUS_HARDEN_RUNNER_UNAVAILABLE = "409";
+// Name of the Windows service the agent is registered as. The agent binary
+// self-detects service mode, and this literal is baked into it.
+const WINDOWS_SERVICE_NAME = "StepSecurityAgent";
 const CONTAINER_MESSAGE = "This job is running in a container. Such jobs can be monitored by installing Harden Runner in a custom VM image for GitHub-hosted runners.";
 const UNSUPPORTED_RUNNER_MESSAGE = "This job is not running in a GitHub Actions Hosted Runner. Harden Runner is only supported on GitHub-hosted runners (Ubuntu, Windows, and macOS). This job will not be monitored.";
 const SELF_HOSTED_RUNNER_MESSAGE = "This job is running on a self-hosted runner.";
@@ -32487,49 +32561,20 @@ function handleWindowsCleanup() {
                 }
             }
         }
-        console.log("stopping windows agent process...");
-        const pidFile = external_path_.join(agentDir, "agent.pid");
+        console.log(`stopping ${WINDOWS_SERVICE_NAME} service...`);
+        // Note: do not return early from here on, so the agent log below is always
+        // printed — it is the main debugging surface for Windows runs.
         try {
-            if (!external_fs_.existsSync(pidFile)) {
-                console.log("PID file not found. Agent may not be running.");
-                return;
+            if (getWindowsServiceState(WINDOWS_SERVICE_NAME) === null) {
+                console.log(`${WINDOWS_SERVICE_NAME} service not found; nothing to remove.`);
             }
-            const pid = parseInt(external_fs_.readFileSync(pidFile, "utf8").trim());
-            console.log(`agent PID from file: ${pid}`);
-            try {
-                process.kill(pid, 0); // signal 0 just checks if process exists
-            }
-            catch (_a) {
-                console.log("agent process not running.");
-                external_fs_.unlinkSync(pidFile);
-                return;
-            }
-            console.log(`stopping agent process (PID: ${pid})...`);
-            process.kill(pid, "SIGINT");
-            let gracefulShutdown = false;
-            for (let i = 0; i < 10; i++) {
-                yield sleep(1000);
-                try {
-                    process.kill(pid, 0); // check if still exists
-                }
-                catch (_b) {
-                    gracefulShutdown = true;
-                    console.log("agent process stopped gracefully");
-                    break;
-                }
-            }
-            if (!gracefulShutdown) {
-                console.log("graceful shutdown timeout (10s), forcing termination...");
-                process.kill(pid, "SIGKILL");
-                console.log("agent process terminated forcefully");
-            }
-            if (external_fs_.existsSync(pidFile)) {
-                external_fs_.unlinkSync(pidFile);
-                console.log("PID file cleaned up");
+            else {
+                yield removeWindowsService(WINDOWS_SERVICE_NAME);
+                console.log(`${WINDOWS_SERVICE_NAME} service stopped and deleted`);
             }
         }
         catch (error) {
-            console.log("warning: error stopping agent process:", error.message);
+            console.log(`warning: error removing ${WINDOWS_SERVICE_NAME} service:`, error.message);
         }
         const log = external_path_.join(agentDir, "agent.log");
         if (external_fs_.existsSync(log)) {

@@ -85081,6 +85081,15 @@ const parse = dist/* parse */.qg;
 // EXTERNAL MODULE: external "os"
 var external_os_ = __nccwpck_require__(857);
 ;// CONCATENATED MODULE: ./src/utils.ts
+var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 
 
 
@@ -85149,6 +85158,68 @@ function detectThirdPartyRunnerProvider() {
         return "blacksmith";
     return null;
 }
+// Returns the SCM state of a Windows service ("RUNNING", "STOPPED",
+// "STOP_PENDING", ...), or null when the service is not installed. sc.exe
+// exits non-zero with error 1060 in that case, which is not an error here.
+function getWindowsServiceState(name) {
+    try {
+        const output = external_child_process_.execFileSync("sc.exe", ["query", name], {
+            encoding: "utf8",
+            windowsHide: true,
+        });
+        const match = output.match(/STATE\s+:\s+\d+\s+(\w+)/);
+        return match ? match[1] : null;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+// Stops and deletes a Windows service, waiting for each transition to settle.
+// Never throws; a failure here should not fail the job.
+function removeWindowsService(name) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (getWindowsServiceState(name) === null) {
+            return;
+        }
+        try {
+            external_child_process_.execFileSync("sc.exe", ["stop", name], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            // Already stopped (or stopping) exits non-zero; the poll below settles it.
+            console.log(`sc.exe stop ${name}: ${error.message}`);
+        }
+        for (let i = 0; i < 20; i++) {
+            const state = getWindowsServiceState(name);
+            if (state === null || state === "STOPPED") {
+                break;
+            }
+            yield serviceSleep(500);
+        }
+        try {
+            external_child_process_.execFileSync("sc.exe", ["delete", name], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            console.log(`sc.exe delete ${name}: ${error.message}`);
+            return;
+        }
+        // Wait for DELETE_PENDING to clear so a subsequent create does not fail.
+        for (let i = 0; i < 10; i++) {
+            if (getWindowsServiceState(name) === null) {
+                break;
+            }
+            yield serviceSleep(500);
+        }
+    });
+}
+function serviceSleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 function utils_getAnnotationLogs(platform) {
     switch (platform) {
         case "linux":
@@ -85163,7 +85234,7 @@ function utils_getAnnotationLogs(platform) {
 }
 
 ;// CONCATENATED MODULE: ./src/common.ts
-var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var common_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -85203,7 +85274,7 @@ const processLogLine = (line, tableEntries) => {
     }
 };
 function addSummary() {
-    return __awaiter(this, void 0, void 0, function* () {
+    return common_awaiter(this, void 0, void 0, function* () {
         var _a;
         if (process.env.STATE_addSummary !== "true") {
             return;
@@ -85264,6 +85335,9 @@ function addSummary() {
     });
 }
 const STATUS_HARDEN_RUNNER_UNAVAILABLE = "409";
+// Name of the Windows service the agent is registered as. The agent binary
+// self-detects service mode, and this literal is baked into it.
+const WINDOWS_SERVICE_NAME = "StepSecurityAgent";
 const CONTAINER_MESSAGE = "This job is running in a container. Such jobs can be monitored by installing Harden Runner in a custom VM image for GitHub-hosted runners.";
 const UNSUPPORTED_RUNNER_MESSAGE = "This job is not running in a GitHub Actions Hosted Runner. Harden Runner is only supported on GitHub-hosted runners (Ubuntu, Windows, and macOS). This job will not be monitored.";
 const SELF_HOSTED_RUNNER_MESSAGE = "This job is running on a self-hosted runner.";
@@ -85811,29 +85885,36 @@ function installWindowsAgent(configStr) {
         const configPath = external_path_.join(agentDir, "config.json");
         external_fs_.writeFileSync(configPath, configStr);
         lib_core.info(`Created config file: ${configPath}`);
-        lib_core.info("Starting Windows Agent...");
+        lib_core.info(`Installing ${WINDOWS_SERVICE_NAME} service...`);
         try {
-            const logPath = external_path_.join(agentDir, "agent.log");
-            const logStream = external_fs_.openSync(logPath, "a");
-            lib_core.info(`Agent logs will be written to: ${logPath}`);
-            const agentProcess = external_child_process_.spawn(agentExePath, [], {
-                cwd: agentDir,
-                detached: true,
-                stdio: ["ignore", logStream, logStream],
-                windowsHide: false,
-                shell: false,
+            // A prior job whose post-step never ran can leave the service behind,
+            // which would make sc.exe create fail with error 1073.
+            yield removeWindowsService(WINDOWS_SERVICE_NAME);
+            // sc.exe takes "binPath=" and its value as separate arguments. The paths
+            // need no inner quoting because agentDir is C:\agent, which has no spaces.
+            external_child_process_.execFileSync("sc.exe", [
+                "create",
+                WINDOWS_SERVICE_NAME,
+                "binPath=",
+                `${agentExePath} --config ${configPath}`,
+                "DisplayName=",
+                "StepSecurity Agent",
+            ], { encoding: "utf8", windowsHide: true });
+            external_child_process_.execFileSync("sc.exe", [
+                "description",
+                WINDOWS_SERVICE_NAME,
+                "StepSecurity Harden Runner Agent",
+            ], { encoding: "utf8", windowsHide: true });
+            external_child_process_.execFileSync("sc.exe", ["start", WINDOWS_SERVICE_NAME], {
+                encoding: "utf8",
+                windowsHide: true,
             });
-            const pidFile = external_path_.join(agentDir, "agent.pid");
-            external_fs_.writeFileSync(pidFile, agentProcess.pid.toString());
-            lib_core.info(`Agent process started with PID: ${agentProcess.pid}`);
-            lib_core.info(`PID saved to: ${pidFile}`);
-            agentProcess.unref();
-            lib_core.info("Windows Agent process started successfully");
+            lib_core.info("StepSecurity Agent service installed and started");
             return true;
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            lib_core.setFailed(`Failed to start Windows agent process: ${errorMessage}`);
+            lib_core.setFailed(`Failed to install/start ${WINDOWS_SERVICE_NAME} service: ${errorMessage}`);
             return false;
         }
     });
