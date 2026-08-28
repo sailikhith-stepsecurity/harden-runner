@@ -31880,7 +31880,19 @@ var lib_core = __nccwpck_require__(7484);
 var external_child_process_ = __nccwpck_require__(5317);
 // EXTERNAL MODULE: external "fs"
 var external_fs_ = __nccwpck_require__(9896);
+// EXTERNAL MODULE: external "os"
+var external_os_ = __nccwpck_require__(857);
 ;// CONCATENATED MODULE: ./src/utils.ts
+var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+
 
 
 function isPlatformSupported(platform) {
@@ -31893,7 +31905,25 @@ function isPlatformSupported(platform) {
             return false;
     }
 }
+// Resolves the user the runner process is executing as. Some runner
+// environments (e.g. AWS CodeBuild-hosted runners) do not set the USER
+// environment variable.
+function getRunnerUser() {
+    if (process.env.USER) {
+        return process.env.USER;
+    }
+    try {
+        return os.userInfo().username;
+    }
+    catch (_a) {
+        return undefined;
+    }
+}
 function chownForFolder(newOwner, target) {
+    if (!newOwner) {
+        console.log(`Unable to determine runner user; skipping chown of ${target}`);
+        return;
+    }
     let cmd = "sudo";
     let args = ["chown", "-R", newOwner, target];
     cp.execFileSync(cmd, args);
@@ -31921,12 +31951,76 @@ function detectThirdPartyRunnerProvider() {
         return "namespace";
     if (process.env["BITRISE_IO"])
         return "bitrise";
+    if (process.env["CODEBUILD_RUNNER_TYPE"] === "GITHUB")
+        return "codebuild";
     const runnerName = (_a = process.env["RUNNER_NAME"]) !== null && _a !== void 0 ? _a : "";
     if (runnerName.startsWith("warp-"))
         return "warp";
     if (runnerName.startsWith("blacksmith-"))
         return "blacksmith";
     return null;
+}
+// Returns the SCM state of a Windows service ("RUNNING", "STOPPED",
+// "STOP_PENDING", ...), or null when the service is not installed. sc.exe
+// exits non-zero with error 1060 in that case, which is not an error here.
+function getWindowsServiceState(name) {
+    try {
+        const output = cp.execFileSync("sc.exe", ["query", name], {
+            encoding: "utf8",
+            windowsHide: true,
+        });
+        const match = output.match(/STATE\s+:\s+\d+\s+(\w+)/);
+        return match ? match[1] : null;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+// Stops and deletes a Windows service, waiting for each transition to settle.
+// Never throws; a failure here should not fail the job.
+function removeWindowsService(name) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (getWindowsServiceState(name) === null) {
+            return;
+        }
+        try {
+            cp.execFileSync("sc.exe", ["stop", name], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            // Already stopped (or stopping) exits non-zero; the poll below settles it.
+            console.log(`sc.exe stop ${name}: ${error.message}`);
+        }
+        for (let i = 0; i < 20; i++) {
+            const state = getWindowsServiceState(name);
+            if (state === null || state === "STOPPED") {
+                break;
+            }
+            yield serviceSleep(500);
+        }
+        try {
+            cp.execFileSync("sc.exe", ["delete", name], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            console.log(`sc.exe delete ${name}: ${error.message}`);
+            return;
+        }
+        // Wait for DELETE_PENDING to clear so a subsequent create does not fail.
+        for (let i = 0; i < 10; i++) {
+            if (getWindowsServiceState(name) === null) {
+                break;
+            }
+            yield serviceSleep(500);
+        }
+    });
+}
+function serviceSleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function utils_getAnnotationLogs(platform) {
     switch (platform) {
@@ -31942,7 +32036,7 @@ function utils_getAnnotationLogs(platform) {
 }
 
 ;// CONCATENATED MODULE: ./src/common.ts
-var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var common_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -31982,7 +32076,7 @@ const processLogLine = (line, tableEntries) => {
     }
 };
 function addSummary() {
-    return __awaiter(this, void 0, void 0, function* () {
+    return common_awaiter(this, void 0, void 0, function* () {
         var _a;
         if (process.env.STATE_addSummary !== "true") {
             return;
@@ -32043,6 +32137,9 @@ function addSummary() {
     });
 }
 const STATUS_HARDEN_RUNNER_UNAVAILABLE = "409";
+// Name of the Windows service the agent is registered as. The agent binary
+// self-detects service mode, and this literal is baked into it.
+const WINDOWS_SERVICE_NAME = "StepSecurityAgent";
 const CONTAINER_MESSAGE = "This job is running in a container. Such jobs can be monitored by installing Harden Runner in a custom VM image for GitHub-hosted runners.";
 const UNSUPPORTED_RUNNER_MESSAGE = "This job is not running in a GitHub Actions Hosted Runner. Harden Runner is only supported on GitHub-hosted runners (Ubuntu, Windows, and macOS). This job will not be monitored.";
 const SELF_HOSTED_RUNNER_MESSAGE = "This job is running on a self-hosted runner.";

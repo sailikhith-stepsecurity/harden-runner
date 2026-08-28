@@ -130,6 +130,10 @@ export async function addSummary() {
 
 export const STATUS_HARDEN_RUNNER_UNAVAILABLE = "409";
 
+// Name of the Windows service the agent is registered as. The agent binary
+// self-detects service mode, and this literal is baked into it.
+export const WINDOWS_SERVICE_NAME = "StepSecurityAgent";
+
 export const CONTAINER_MESSAGE =
   "This job is running in a container. Such jobs can be monitored by installing Harden Runner in a custom VM image for GitHub-hosted runners.";
 

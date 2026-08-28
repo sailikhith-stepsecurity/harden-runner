@@ -37,7 +37,7 @@ import {
   installWindowsAgent,
 } from "./install-agent";
 
-import { chownForFolder, detectThirdPartyRunnerProvider, isAgentInstalled, isPlatformSupported, shouldDeployAgentOnSelfHosted } from "./utils";
+import { chownForFolder, getRunnerUser, detectThirdPartyRunnerProvider, isAgentInstalled, isPlatformSupported, shouldDeployAgentOnSelfHosted } from "./utils";
 import { buildBravoConfig } from "./bravo-config";
 
 interface MonitorResponse {
@@ -448,6 +448,8 @@ process.on("unhandledRejection", (reason) => {
     let statusFile = "";
     let logFile = "";
     let agentInstalled = false;
+    // How long to wait for the agent to write agent.status.
+    let statusTimeoutMs = 9000;
 
     switch (process.platform) {
       case "linux":
@@ -455,7 +457,7 @@ process.on("unhandledRejection", (reason) => {
         logFile = "/home/agent/agent.log";
 
         cp.execSync("sudo mkdir -p /home/agent");
-        chownForFolder(process.env.USER, "/home/agent");
+        chownForFolder(getRunnerUser(), "/home/agent");
 
         let isTLS = await isTLSEnabled(context.repo.owner);
         agentInstalled = await installAgent(isTLS, configStr);
@@ -468,6 +470,8 @@ process.on("unhandledRejection", (reason) => {
         const agentDir = process.env.STATE_agentDir || "C:\\agent";
         statusFile = path.join(agentDir, "agent.status");
         logFile = path.join(agentDir, "agent.log");
+        // The service is started via SCM, so it needs longer to come up.
+        statusTimeoutMs = 20000;
 
         break;
       case "darwin":
@@ -483,11 +487,13 @@ process.on("unhandledRejection", (reason) => {
     }
 
     if (agentInstalled) {
+      const pollIntervalMs = 300;
+      const maxAttempts = Math.ceil(statusTimeoutMs / pollIntervalMs);
       var counter = 0;
       while (true) {
         if (!fs.existsSync(statusFile)) {
           counter++;
-          if (counter > 30) {
+          if (counter > maxAttempts) {
             console.log("timed out");
             if (fs.existsSync(logFile)) {
               var content = fs.readFileSync(logFile, "utf-8");
@@ -495,7 +501,7 @@ process.on("unhandledRejection", (reason) => {
             }
             break;
           }
-          await sleep(300);
+          await sleep(pollIntervalMs);
         } // The file *does* exist
         else {
           // Read the file
@@ -575,7 +581,7 @@ export async function installAgentForSelfHosted(owner: string, confg: Configurat
     const selfHostedConfigStr = JSON.stringify(selfHostedConfig);
 
     cp.execSync("sudo mkdir -p /home/agent");
-    chownForFolder(process.env.USER, "/home/agent");
+    chownForFolder(getRunnerUser(), "/home/agent");
 
     const agentInstalled = await installAgent(isTLS, selfHostedConfigStr);
 
@@ -619,7 +625,7 @@ export async function installAgentForBravo(owner: string, bravoConfigStr: string
     }
 
     cp.execSync("sudo mkdir -p /home/agent");
-    chownForFolder(process.env.USER, "/home/agent");
+    chownForFolder(getRunnerUser(), "/home/agent");
 
     await installAgentBravo(bravoConfigStr);
   } catch (error) {

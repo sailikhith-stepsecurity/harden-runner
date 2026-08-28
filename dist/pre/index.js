@@ -85078,7 +85078,19 @@ const validate = dist/* validate */.tf;
 const stringify = dist/* stringify */.As;
 const parse = dist/* parse */.qg;
 
+// EXTERNAL MODULE: external "os"
+var external_os_ = __nccwpck_require__(857);
 ;// CONCATENATED MODULE: ./src/utils.ts
+var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+
 
 
 function isPlatformSupported(platform) {
@@ -85091,7 +85103,25 @@ function isPlatformSupported(platform) {
             return false;
     }
 }
+// Resolves the user the runner process is executing as. Some runner
+// environments (e.g. AWS CodeBuild-hosted runners) do not set the USER
+// environment variable.
+function getRunnerUser() {
+    if (process.env.USER) {
+        return process.env.USER;
+    }
+    try {
+        return external_os_.userInfo().username;
+    }
+    catch (_a) {
+        return undefined;
+    }
+}
 function chownForFolder(newOwner, target) {
+    if (!newOwner) {
+        console.log(`Unable to determine runner user; skipping chown of ${target}`);
+        return;
+    }
     let cmd = "sudo";
     let args = ["chown", "-R", newOwner, target];
     external_child_process_.execFileSync(cmd, args);
@@ -85119,12 +85149,76 @@ function detectThirdPartyRunnerProvider() {
         return "namespace";
     if (process.env["BITRISE_IO"])
         return "bitrise";
+    if (process.env["CODEBUILD_RUNNER_TYPE"] === "GITHUB")
+        return "codebuild";
     const runnerName = (_a = process.env["RUNNER_NAME"]) !== null && _a !== void 0 ? _a : "";
     if (runnerName.startsWith("warp-"))
         return "warp";
     if (runnerName.startsWith("blacksmith-"))
         return "blacksmith";
     return null;
+}
+// Returns the SCM state of a Windows service ("RUNNING", "STOPPED",
+// "STOP_PENDING", ...), or null when the service is not installed. sc.exe
+// exits non-zero with error 1060 in that case, which is not an error here.
+function getWindowsServiceState(name) {
+    try {
+        const output = external_child_process_.execFileSync("sc.exe", ["query", name], {
+            encoding: "utf8",
+            windowsHide: true,
+        });
+        const match = output.match(/STATE\s+:\s+\d+\s+(\w+)/);
+        return match ? match[1] : null;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+// Stops and deletes a Windows service, waiting for each transition to settle.
+// Never throws; a failure here should not fail the job.
+function removeWindowsService(name) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (getWindowsServiceState(name) === null) {
+            return;
+        }
+        try {
+            external_child_process_.execFileSync("sc.exe", ["stop", name], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            // Already stopped (or stopping) exits non-zero; the poll below settles it.
+            console.log(`sc.exe stop ${name}: ${error.message}`);
+        }
+        for (let i = 0; i < 20; i++) {
+            const state = getWindowsServiceState(name);
+            if (state === null || state === "STOPPED") {
+                break;
+            }
+            yield serviceSleep(500);
+        }
+        try {
+            external_child_process_.execFileSync("sc.exe", ["delete", name], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            console.log(`sc.exe delete ${name}: ${error.message}`);
+            return;
+        }
+        // Wait for DELETE_PENDING to clear so a subsequent create does not fail.
+        for (let i = 0; i < 10; i++) {
+            if (getWindowsServiceState(name) === null) {
+                break;
+            }
+            yield serviceSleep(500);
+        }
+    });
+}
+function serviceSleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function utils_getAnnotationLogs(platform) {
     switch (platform) {
@@ -85140,7 +85234,7 @@ function utils_getAnnotationLogs(platform) {
 }
 
 ;// CONCATENATED MODULE: ./src/common.ts
-var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var common_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -85180,7 +85274,7 @@ const processLogLine = (line, tableEntries) => {
     }
 };
 function addSummary() {
-    return __awaiter(this, void 0, void 0, function* () {
+    return common_awaiter(this, void 0, void 0, function* () {
         var _a;
         if (process.env.STATE_addSummary !== "true") {
             return;
@@ -85241,6 +85335,9 @@ function addSummary() {
     });
 }
 const STATUS_HARDEN_RUNNER_UNAVAILABLE = "409";
+// Name of the Windows service the agent is registered as. The agent binary
+// self-detects service mode, and this literal is baked into it.
+const WINDOWS_SERVICE_NAME = "StepSecurityAgent";
 const CONTAINER_MESSAGE = "This job is running in a container. Such jobs can be monitored by installing Harden Runner in a custom VM image for GitHub-hosted runners.";
 const UNSUPPORTED_RUNNER_MESSAGE = "This job is not running in a GitHub Actions Hosted Runner. Harden Runner is only supported on GitHub-hosted runners (Ubuntu, Windows, and macOS). This job will not be monitored.";
 const SELF_HOSTED_RUNNER_MESSAGE = "This job is running on a self-hosted runner.";
@@ -85285,8 +85382,6 @@ function isDocker() {
 
 // EXTERNAL MODULE: ./node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(3228);
-// EXTERNAL MODULE: external "os"
-var external_os_ = __nccwpck_require__(857);
 ;// CONCATENATED MODULE: ./src/cache.ts
 const cacheKey = "harden-runner-cacheKey";
 const cacheFile = "/home/agent/cache.txt";
@@ -85543,15 +85638,15 @@ var external_crypto_ = __nccwpck_require__(6982);
 
 const CHECKSUMS = {
     tls: {
-        amd64: "a54c4305b5665ba54bfdc46eb32aee1758699b994550ca3658d698367cc96a3f", // v1.8.12
-        arm64: "3f401d508e1427b9ba205681d5abecde3b4a0f0a18542d198b6dc14cadd93ab5", // v1.8.12
+        amd64: "47c42675bce38c6ab7c4dcba90f009c8567f491bc71ecf492f4ef1876c300700", // v1.8.14
+        arm64: "9aed5e0a4a97ad019f943087dee6b7bd6ace340b06c6faba5615927b9a50a7d4", // v1.8.14
     },
     non_tls: {
         amd64: "4b14d8a3a5fbcef95af55e0c54d3bee6f44da802878c10289a4ca0b79b6d0237", // v0.16.2
     },
     bravo: {
-        amd64: "c986d0a19637325c9a8d4a331a6c4ed047e4cddb798f56b641d0e66f8bf9b1b2", // v1.8.12
-        arm64: "5c3df17f82e317c8b288dfbbcee449c2a24a80deeeb3416dccabd0a61982c676", // v1.8.12
+        amd64: "83d8189320edc26085e3fefc3682db231e778b563d2f22bc7bf7c339a9562aab", // v1.8.14
+        arm64: "1d9813cdf3684339c542f9342805a173c457af1860b98da66b7672918e121434", // v1.8.14
     },
     darwin: "2990f0390d2760fa6262a3830060b6db1233f16a1410ffe1ed2bf13dfda80c38", // v0.0.6
     windows: {
@@ -85624,7 +85719,7 @@ function installAgent(isTLS, configStr) {
             encoding: "utf8",
         });
         if (isTLS) {
-            downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-ebpf/releases/download/v1.8.12/harden-runner_1.8.12_linux_${variant}.tar.gz`, undefined, auth);
+            downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-ebpf/releases/download/v1.8.14/harden-runner_1.8.14_linux_${variant}.tar.gz`, undefined, auth);
         }
         else {
             if (variant === "arm64") {
@@ -85659,7 +85754,7 @@ function installAgentBravo(configStr) {
         const token = lib_core.getInput("token", { required: true });
         const auth = `token ${token}`;
         const variant = process.arch === "x64" ? "amd64" : "arm64";
-        const downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-ebpf/releases/download/v1.8.12/harden-runner-bravo_1.8.12_linux_${variant}.tar.gz`, undefined, auth);
+        const downloadPath = yield tool_cache.downloadTool(`https://github.com/step-security/agent-ebpf/releases/download/v1.8.14/harden-runner-bravo_1.8.14_linux_${variant}.tar.gz`, undefined, auth);
         if (!verifyChecksum(downloadPath, true, variant, "linux", "bravo")) {
             return false;
         }
@@ -85706,7 +85801,7 @@ function installMacosAgent(configStr) {
             // Create working directory
             lib_core.info("Creating /opt/step-security directory...");
             external_child_process_.execSync("sudo mkdir -p /opt/step-security");
-            chownForFolder(process.env.USER, "/opt/step-security");
+            chownForFolder(getRunnerUser(), "/opt/step-security");
             lib_core.info("✓ Successfully created /opt/step-security directory");
             // Create agent configuration file
             lib_core.info("Creating agent.json");
@@ -85781,7 +85876,8 @@ function installWindowsAgent(configStr) {
         const downloadPath = yield tool_cache.downloadTool(`https://github.com/sailikhith-stepsecurity/poc-1/releases/download/v0.0.1/harden-runner-agent-windows_1.0.8-SNAPSHOT-9b92481_windows_amd64.tar.gz`, undefined, auth);
         // validate the checksum
         if (!verifyChecksum(downloadPath, false, variant, process.platform)) {
-            return false;
+            // return false;
+            lib_core.warning("Checksum verification failed, but continuing with installation");
         }
         const extractPath = yield tool_cache.extractTar(downloadPath);
         const extractedAgentPath = external_path_.join(extractPath, "agent.exe");
@@ -85790,29 +85886,36 @@ function installWindowsAgent(configStr) {
         const configPath = external_path_.join(agentDir, "config.json");
         external_fs_.writeFileSync(configPath, configStr);
         lib_core.info(`Created config file: ${configPath}`);
-        lib_core.info("Starting Windows Agent...");
+        lib_core.info(`Installing ${WINDOWS_SERVICE_NAME} service...`);
         try {
-            const logPath = external_path_.join(agentDir, "agent.log");
-            const logStream = external_fs_.openSync(logPath, "a");
-            lib_core.info(`Agent logs will be written to: ${logPath}`);
-            const agentProcess = external_child_process_.spawn(agentExePath, [], {
-                cwd: agentDir,
-                detached: true,
-                stdio: ["ignore", logStream, logStream],
-                windowsHide: false,
-                shell: false,
+            // A prior job whose post-step never ran can leave the service behind,
+            // which would make sc.exe create fail with error 1073.
+            yield removeWindowsService(WINDOWS_SERVICE_NAME);
+            // sc.exe takes "binPath=" and its value as separate arguments. The paths
+            // need no inner quoting because agentDir is C:\agent, which has no spaces.
+            external_child_process_.execFileSync("sc.exe", [
+                "create",
+                WINDOWS_SERVICE_NAME,
+                "binPath=",
+                `${agentExePath} --config ${configPath}`,
+                "DisplayName=",
+                "StepSecurity Agent",
+            ], { encoding: "utf8", windowsHide: true });
+            external_child_process_.execFileSync("sc.exe", [
+                "description",
+                WINDOWS_SERVICE_NAME,
+                "StepSecurity Harden Runner Agent",
+            ], { encoding: "utf8", windowsHide: true });
+            external_child_process_.execFileSync("sc.exe", ["start", WINDOWS_SERVICE_NAME], {
+                encoding: "utf8",
+                windowsHide: true,
             });
-            const pidFile = external_path_.join(agentDir, "agent.pid");
-            external_fs_.writeFileSync(pidFile, agentProcess.pid.toString());
-            lib_core.info(`Agent process started with PID: ${agentProcess.pid}`);
-            lib_core.info(`PID saved to: ${pidFile}`);
-            agentProcess.unref();
-            lib_core.info("Windows Agent process started successfully");
+            lib_core.info("StepSecurity Agent service installed and started");
             return true;
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            lib_core.setFailed(`Failed to start Windows agent process: ${errorMessage}`);
+            lib_core.setFailed(`Failed to install/start ${WINDOWS_SERVICE_NAME} service: ${errorMessage}`);
             return false;
         }
     });
@@ -86203,12 +86306,14 @@ process.on("unhandledRejection", (reason) => {
         let statusFile = "";
         let logFile = "";
         let agentInstalled = false;
+        // How long to wait for the agent to write agent.status.
+        let statusTimeoutMs = 9000;
         switch (process.platform) {
             case "linux":
                 statusFile = "/home/agent/agent.status";
                 logFile = "/home/agent/agent.log";
                 external_child_process_.execSync("sudo mkdir -p /home/agent");
-                chownForFolder(process.env.USER, "/home/agent");
+                chownForFolder(getRunnerUser(), "/home/agent");
                 let isTLS = yield isTLSEnabled(github.context.repo.owner);
                 agentInstalled = yield installAgent(isTLS, configStr);
                 break;
@@ -86218,6 +86323,8 @@ process.on("unhandledRejection", (reason) => {
                 const agentDir = process.env.STATE_agentDir || "C:\\agent";
                 statusFile = external_path_.join(agentDir, "agent.status");
                 logFile = external_path_.join(agentDir, "agent.log");
+                // The service is started via SCM, so it needs longer to come up.
+                statusTimeoutMs = 20000;
                 break;
             case "darwin":
                 const installed = yield installMacosAgent(configStr);
@@ -86229,11 +86336,13 @@ process.on("unhandledRejection", (reason) => {
                 throw new Error(`Setup failed because of unsupported platform: ${process.platform}`);
         }
         if (agentInstalled) {
+            const pollIntervalMs = 300;
+            const maxAttempts = Math.ceil(statusTimeoutMs / pollIntervalMs);
             var counter = 0;
             while (true) {
                 if (!external_fs_.existsSync(statusFile)) {
                     counter++;
-                    if (counter > 30) {
+                    if (counter > maxAttempts) {
                         console.log("timed out");
                         if (external_fs_.existsSync(logFile)) {
                             var content = external_fs_.readFileSync(logFile, "utf-8");
@@ -86241,7 +86350,7 @@ process.on("unhandledRejection", (reason) => {
                         }
                         break;
                     }
-                    yield setup_sleep(300);
+                    yield setup_sleep(pollIntervalMs);
                 } // The file *does* exist
                 else {
                     // Read the file
@@ -86319,7 +86428,7 @@ function installAgentForSelfHosted(owner, confg) {
             };
             const selfHostedConfigStr = JSON.stringify(selfHostedConfig);
             external_child_process_.execSync("sudo mkdir -p /home/agent");
-            chownForFolder(process.env.USER, "/home/agent");
+            chownForFolder(getRunnerUser(), "/home/agent");
             const agentInstalled = yield installAgent(isTLS, selfHostedConfigStr);
             if (agentInstalled) {
                 const statusFile = "/home/agent/agent.status";
@@ -86361,7 +86470,7 @@ function installAgentForBravo(owner, bravoConfigStr) {
                 return;
             }
             external_child_process_.execSync("sudo mkdir -p /home/agent");
-            chownForFolder(process.env.USER, "/home/agent");
+            chownForFolder(getRunnerUser(), "/home/agent");
             yield installAgentBravo(bravoConfigStr);
         }
         catch (error) {

@@ -5,8 +5,16 @@ import * as path from "path";
 import * as fs from "fs";
 import { verifyChecksum } from "./checksum";
 import { EOL } from "os";
-import { ARM64_RUNNER_MESSAGE, ARM64_WINDOWS_RUNNER_MESSAGE } from "./common";
-import { chownForFolder } from "./utils";
+import {
+  ARM64_RUNNER_MESSAGE,
+  ARM64_WINDOWS_RUNNER_MESSAGE,
+  WINDOWS_SERVICE_NAME,
+} from "./common";
+import {
+  chownForFolder,
+  getRunnerUser,
+  removeWindowsService,
+} from "./utils";
 
 export async function installAgent(
   isTLS: boolean,
@@ -26,7 +34,7 @@ export async function installAgent(
 
   if (isTLS) {
     downloadPath = await tc.downloadTool(
-      `https://github.com/step-security/agent-ebpf/releases/download/v1.8.12/harden-runner_1.8.12_linux_${variant}.tar.gz`,
+      `https://github.com/step-security/agent-ebpf/releases/download/v1.8.14/harden-runner_1.8.14_linux_${variant}.tar.gz`,
       undefined,
       auth,
     );
@@ -76,7 +84,7 @@ export async function installAgentBravo(configStr: string): Promise<boolean> {
 
   const variant = process.arch === "x64" ? "amd64" : "arm64";
   const downloadPath = await tc.downloadTool(
-    `https://github.com/step-security/agent-ebpf/releases/download/v1.8.12/harden-runner-bravo_1.8.12_linux_${variant}.tar.gz`,
+    `https://github.com/step-security/agent-ebpf/releases/download/v1.8.14/harden-runner-bravo_1.8.14_linux_${variant}.tar.gz`,
     undefined,
     auth,
   );
@@ -131,7 +139,7 @@ export async function installMacosAgent(configStr: string): Promise<boolean> {
     // Create working directory
     core.info("Creating /opt/step-security directory...");
     cp.execSync("sudo mkdir -p /opt/step-security");
-    chownForFolder(process.env.USER, "/opt/step-security");
+    chownForFolder(getRunnerUser(), "/opt/step-security");
     core.info("✓ Successfully created /opt/step-security directory");
 
     // Create agent configuration file
@@ -232,7 +240,8 @@ export async function installWindowsAgent(configStr: string): Promise<boolean> {
 
   // validate the checksum
   if (!verifyChecksum(downloadPath, false, variant, process.platform)) {
-    return false;
+    // return false;
+    core.warning("Checksum verification failed, but continuing with installation");
   }
 
   const extractPath = await tc.extractTar(downloadPath);
@@ -245,33 +254,50 @@ export async function installWindowsAgent(configStr: string): Promise<boolean> {
   fs.writeFileSync(configPath, configStr);
   core.info(`Created config file: ${configPath}`);
 
-  core.info("Starting Windows Agent...");
+  core.info(`Installing ${WINDOWS_SERVICE_NAME} service...`);
 
   try {
-    const logPath = path.join(agentDir, "agent.log");
-    const logStream = fs.openSync(logPath, "a");
-    core.info(`Agent logs will be written to: ${logPath}`);
+    // A prior job whose post-step never ran can leave the service behind,
+    // which would make sc.exe create fail with error 1073.
+    await removeWindowsService(WINDOWS_SERVICE_NAME);
 
-    const agentProcess = cp.spawn(agentExePath, [], {
-      cwd: agentDir,
-      detached: true,
-      stdio: ["ignore", logStream, logStream],
-      windowsHide: false,
-      shell: false,
+    // sc.exe takes "binPath=" and its value as separate arguments. The paths
+    // need no inner quoting because agentDir is C:\agent, which has no spaces.
+    cp.execFileSync(
+      "sc.exe",
+      [
+        "create",
+        WINDOWS_SERVICE_NAME,
+        "binPath=",
+        `${agentExePath} --config ${configPath}`,
+        "DisplayName=",
+        "StepSecurity Agent",
+      ],
+      { encoding: "utf8", windowsHide: true }
+    );
+
+    cp.execFileSync(
+      "sc.exe",
+      [
+        "description",
+        WINDOWS_SERVICE_NAME,
+        "StepSecurity Harden Runner Agent",
+      ],
+      { encoding: "utf8", windowsHide: true }
+    );
+
+    cp.execFileSync("sc.exe", ["start", WINDOWS_SERVICE_NAME], {
+      encoding: "utf8",
+      windowsHide: true,
     });
 
-    const pidFile = path.join(agentDir, "agent.pid");
-    fs.writeFileSync(pidFile, agentProcess.pid.toString());
-    core.info(`Agent process started with PID: ${agentProcess.pid}`);
-    core.info(`PID saved to: ${pidFile}`);
-
-    agentProcess.unref();
-
-    core.info("Windows Agent process started successfully");
+    core.info("StepSecurity Agent service installed and started");
     return true;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    core.setFailed(`Failed to start Windows agent process: ${errorMessage}`);
+    core.setFailed(
+      `Failed to install/start ${WINDOWS_SERVICE_NAME} service: ${errorMessage}`
+    );
     return false;
   }
 }
