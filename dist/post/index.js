@@ -31883,6 +31883,8 @@ const STEPSECURITY_ENV = "agent"; // agent or int
 const configs_STEPSECURITY_API_URL = `https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`;
 const STEPSECURITY_TELEMETRY_URL = "https://prod.app-api.stepsecurity.io/v1";
 const STEPSECURITY_WEB_URL = "https://app.stepsecurity.io";
+// OIDC audience the secure-registry session API accepts.
+const SECURE_REGISTRY_AUDIENCE = "stepsecurity-secure-registry";
 
 // EXTERNAL MODULE: external "child_process"
 var external_child_process_ = __nccwpck_require__(5317);

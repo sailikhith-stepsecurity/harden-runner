@@ -38,6 +38,7 @@ import {
 
 import { chownForFolder, getRunnerUser, getPrivilegeMode, detectThirdPartyRunnerProvider, isAgentInstalled, isPlatformSupported, shouldDeployAgentOnSelfHosted, ThirdPartyRunnerProvider } from "./utils";
 import { buildBravoConfig } from "./bravo-config";
+import { setupSecureRegistry } from "./secure-registry";
 
 interface MonitorResponse {
   runner_ip_address?: string;
@@ -147,11 +148,15 @@ async function resolveCacheHost(): Promise<string | undefined> {
     }
     if (isGithubHosted() && isDocker()) {
       console.log(common.CONTAINER_MESSAGE);
+      // No agent here, but npm in the container still reads the user config
+      // written under RUNNER_TEMP, which is mounted into the container.
+      await setupSecureRegistry();
       return;
     }
 
     if (isGithubHosted() && process.platform === "linux" && !process.env.USER) {
       console.log(common.UBUNTU_SLIM_MESSAGE);
+      await setupSecureRegistry();
       return;
     }
 
@@ -317,6 +322,17 @@ async function resolveCacheHost(): Promise<string | undefined> {
 
     if (confg.disable_telemetry !== true && confg.disable_telemetry !== false) {
       core.setFailed("disable-telemetry must be a boolean value");
+    }
+
+    // Runs before every path below that hands allowed-endpoints to an agent.
+    const secureRegistry = await setupSecureRegistry();
+    if (
+      secureRegistry.registryEndpoint &&
+      confg.egress_policy === "block" &&
+      !isDenyListMode
+    ) {
+      core.info(`Adding secure-registry endpoint: ${secureRegistry.registryEndpoint} to allowed-endpoints`);
+      confg.allowed_endpoints += ` ${secureRegistry.registryEndpoint}`;
     }
 
     if (

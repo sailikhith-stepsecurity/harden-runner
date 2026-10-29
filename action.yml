@@ -56,6 +56,10 @@ inputs:
     description: "GHES server name registered with StepSecurity. Required in GitHub Enterprise Server (GHES) environments for TLS checks, policy fetching, and direct self-hosted VM agent installation."
     required: false
     default: ""
+  secure-registry:
+    description: "Route npm installs in this job through StepSecurity secure-registry. Set to true for the default settings, or to a YAML block with per-ecosystem settings. Requires id-token: write permission. Leave empty or set to false to disable."
+    required: false
+    default: ""
 
 branding:
   icon: "check-square"
