@@ -37,13 +37,13 @@ jobs:
         rc: true
 
     - name: Canary test
-      uses: docker://ghcr.io/step-security/integration-test/int:latest
+      uses: docker://ghcr.io/step-security/integration-test/int:latest@sha256:e7850f0ac567907e3437f0daba69e3a22b03d791f24fb9e45a1590f12286328d
       env:
         PAT: ${{ secrets.PAT }}
         canary: true
 
     - name: Canary TLS test
-      uses: docker://ghcr.io/step-security/integration-test/int:latest
+      uses: docker://ghcr.io/step-security/integration-test/int:latest@sha256:e7850f0ac567907e3437f0daba69e3a22b03d791f24fb9e45a1590f12286328d
       env:
         PAT: ${{ secrets.PAT }}
         canary-tls: true
