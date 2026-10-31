@@ -1,0 +1,3 @@
+cp ~/Downloads/agent.exe  .
+tar -czvf harden-runner-agent-windows_int_windows_amd64.tar.gz agent.exe
+cp harden-runner-agent-windows_int_windows_amd64.tar.gz ~/Desktop
