@@ -32418,8 +32418,13 @@ function registryOverride(env, registryUrl) {
     }
     return undefined;
 }
+// In container jobs the workspace belongs to another user, and
+// actions/checkout removes its safe.directory entry in its own post step,
+// which runs before this one. The workspace is trusted here, but settings
+// that run commands (fsmonitor, external diff) stay off.
 function git(cwd, args) {
-    const out = external_child_process_.execFileSync("git", args, {
+    const safe = ["-c", `safe.directory=${cwd}`, "-c", "core.fsmonitor=false"];
+    const out = external_child_process_.execFileSync("git", [...safe, ...args], {
         cwd,
         encoding: "utf8",
         timeout: 10000,
@@ -32438,10 +32443,10 @@ function changedFiles(workspace, sha) {
             files.add(f);
     };
     add(["ls-files", "-z", "--modified", "--others", "--exclude-standard"]);
-    add(["diff", "-z", "--name-only", "--cached"]);
+    add(["diff", "-z", "--no-ext-diff", "--name-only", "--cached"]);
     if (sha) {
         try {
-            add(["diff", "-z", "--name-only", sha, "HEAD"]);
+            add(["diff", "-z", "--no-ext-diff", "--name-only", sha, "HEAD"]);
         }
         catch (e) {
             lib_core.debug(`secure-registry: unable to diff against ${sha}: ${e}`);
