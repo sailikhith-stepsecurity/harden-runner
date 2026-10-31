@@ -32323,7 +32323,7 @@ function describeRegistry(value) {
 // Builds the job's npm user config: the source lines verbatim (${VAR}
 // references are left for npm to expand), minus unscoped registry= lines and
 // any existing settings for the secure-registry host, followed by our
-// registry and its host-scoped token.
+// registry, its host-scoped token and a host-scoped always-auth.
 function mergeNpmrc(source, opts) {
     const eol = source.includes("\r\n") ? "\r\n" : "\n";
     const registry = new URL(opts.registryUrl);
@@ -32341,6 +32341,12 @@ function mergeNpmrc(source, opts) {
     }
     kept.push(`registry=${registry.href}`);
     kept.push(`//${registry.host}${registry.pathname}:_authToken=${opts.token}`);
+    // yarn 1 sends the token for unscoped packages only when always-auth is
+    // set, and gets 401 without it. npm and pnpm ignore the key (npm 11 prints
+    // an "Unknown user config" warning). Scoped to our host, so it beats a
+    // global always-auth=false (setup-node writes one) and no other registry
+    // gets credentials.
+    kept.push(`//${registry.host}${registry.pathname}:always-auth=true`);
     if (opts.omitLockfileResolved) {
         kept.push("omit-lockfile-registry-resolved=true");
     }

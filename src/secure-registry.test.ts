@@ -240,7 +240,8 @@ describe("setupSecureRegistry", () => {
     expect(logged()).not.toContain(TOKEN);
 
     expect(fs.readFileSync(npmrcPath(), "utf8")).toBe(
-      `registry=${REGISTRY}\n//community.registry-int.stepsecurity.io/javascript/:_authToken=${TOKEN}\n`
+      `registry=${REGISTRY}\n//community.registry-int.stepsecurity.io/javascript/:_authToken=${TOKEN}\n` +
+        "//community.registry-int.stepsecurity.io/javascript/:always-auth=true\n"
     );
     if (process.platform !== "win32") {
       expect(fs.statSync(npmrcPath()).mode & 0o777).toBe(0o600);
@@ -272,6 +273,7 @@ describe("setupSecureRegistry", () => {
         "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}",
         `registry=${REGISTRY}`,
         `//community.registry-int.stepsecurity.io/javascript/:_authToken=${TOKEN}`,
+        "//community.registry-int.stepsecurity.io/javascript/:always-auth=true",
       ].join("\n") + "\n"
     );
     // The user's own file is left untouched.
@@ -295,6 +297,7 @@ describe("setupSecureRegistry", () => {
         "always-auth=false",
         `registry=${REGISTRY}`,
         `//community.registry-int.stepsecurity.io/javascript/:_authToken=${TOKEN}`,
+        "//community.registry-int.stepsecurity.io/javascript/:always-auth=true",
       ].join("\n") + "\n"
     );
     if (process.platform !== "win32") {

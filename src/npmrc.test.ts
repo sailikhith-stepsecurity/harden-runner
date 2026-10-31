@@ -11,6 +11,7 @@ const TOKEN = "step_srci_token";
 const OURS = [
   `registry=${REGISTRY}`,
   `//community.registry-int.stepsecurity.io/javascript/:_authToken=${TOKEN}`,
+  "//community.registry-int.stepsecurity.io/javascript/:always-auth=true",
 ];
 
 function merge(source: string, omitLockfileResolved = false) {
@@ -114,6 +115,11 @@ describe("mergeNpmrc", () => {
       "//registry.example.com/:_authToken=keep-me",
     ].join("\n");
     expect(merge(source)).toBe(["//registry.example.com/:_authToken=keep-me", ...OURS].join("\n") + "\n");
+  });
+
+  test("keeps a global always-auth=false next to our host-scoped always-auth", () => {
+    // setup-node writes always-auth=false; yarn 1 reads the host-scoped key first.
+    expect(merge("always-auth=false\n")).toBe(["always-auth=false", ...OURS].join("\n") + "\n");
   });
 
   test("keeps comments and blank lines in the middle", () => {
