@@ -32147,10 +32147,10 @@ function isDocker() {
 }
 
 ;// CONCATENATED MODULE: ./src/configs.ts
-const STEPSECURITY_ENV = "agent"; // agent or int
+const STEPSECURITY_ENV = "int"; // agent or int
 const configs_STEPSECURITY_API_URL = (/* unused pure expression or super */ null && (`https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`));
-const STEPSECURITY_TELEMETRY_URL = "https://prod.app-api.stepsecurity.io/v1";
-const STEPSECURITY_WEB_URL = "https://app.stepsecurity.io";
+const STEPSECURITY_TELEMETRY_URL = "https://int.app-api.stepsecurity.io/v1";
+const STEPSECURITY_WEB_URL = "https://int1.stepsecurity.io";
 // OIDC audience the secure-registry session API accepts.
 const SECURE_REGISTRY_AUDIENCE = "stepsecurity-secure-registry";
 
