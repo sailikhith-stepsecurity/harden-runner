@@ -679,11 +679,25 @@ describe("setupSecureRegistry", () => {
     expect(mockedCore.warning.mock.calls[0][0]).toContain("Failed to get ID Token");
   });
 
-  test("200 without a token means every ecosystem is off", async () => {
+  test("200 without a token when npm is off", async () => {
+    mockFetchSequence([
+      jsonResponse(200, { edition: "community", registries: {}, config: { npm: { mode: "off" } }, notices: [] }),
+    ]);
+
+    expect(await setupSecureRegistry()).toEqual({});
+    expect(mockedCore.info).toHaveBeenCalledWith("secure-registry: npm is off, nothing to configure");
+    expect(mockedCore.warning).not.toHaveBeenCalled();
+    expect(fs.existsSync(npmrcPath())).toBe(false);
+    expect(readState()).toEqual({});
+  });
+
+  test("200 without a token when ecosystems leaves out npm", async () => {
     mockFetchSequence([jsonResponse(200, { edition: "community", registries: {}, config: {}, notices: [] })]);
 
     expect(await setupSecureRegistry()).toEqual({});
-    expect(mockedCore.info).toHaveBeenCalledWith("secure-registry: every ecosystem is off, nothing to configure");
+    expect(mockedCore.info).toHaveBeenCalledWith(
+      "secure-registry: npm is not listed in ecosystems, nothing to configure"
+    );
     expect(mockedCore.warning).not.toHaveBeenCalled();
     expect(fs.existsSync(npmrcPath())).toBe(false);
     expect(readState()).toEqual({});
@@ -701,6 +715,22 @@ describe("setupSecureRegistry", () => {
 
     expect(await setupSecureRegistry()).toEqual({});
     expect(mockedCore.warning.mock.calls[0][0]).toContain("non-https");
+    expect(fs.existsSync(npmrcPath())).toBe(false);
+    expect(readState()).toEqual({ srToken: TOKEN, srEdition: "community", srBinding: "oidc" });
+  });
+
+  test("a token for other ecosystems only leaves npm alone", async () => {
+    mockFetchSequence([
+      created({
+        registries: { pypi: "https://community.registry-int.stepsecurity.io/python/" },
+        config: { pypi: { mode: "enforce" } },
+      }),
+    ]);
+
+    expect(await setupSecureRegistry()).toEqual({});
+    expect(mockedCore.info).toHaveBeenCalledWith(
+      "secure-registry: npm is not listed in ecosystems, nothing to configure"
+    );
     expect(fs.existsSync(npmrcPath())).toBe(false);
     expect(readState()).toEqual({ srToken: TOKEN, srEdition: "community", srBinding: "oidc" });
   });

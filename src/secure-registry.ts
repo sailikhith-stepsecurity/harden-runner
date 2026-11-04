@@ -36,8 +36,17 @@ interface SessionResponse {
   binding?: string;
   edition?: string;
   registries?: Record<string, string>;
-  config?: Record<string, { lockfile_resolved?: string }>;
+  config?: Record<string, { mode?: string; lockfile_resolved?: string }>;
   notices?: SessionNotice[];
+}
+
+// Why the session gave npm no registry. The resolved config leaves out every
+// ecosystem not listed in `ecosystems`, and keeps a covered one with mode off.
+export function npmNotConfiguredReason(session: SessionResponse): string {
+  if (session.config?.npm) {
+    return "npm is off";
+  }
+  return "npm is not listed in ecosystems";
 }
 
 // The Harden-Runner correlation ID and the one-time key /monitor issued for
@@ -500,7 +509,7 @@ async function configureNpm(config: string, job: JobBinding): Promise<SecureRegi
     if (result.status === 201) {
       skipWarning("the session API returned no token");
     } else {
-      core.info("secure-registry: every ecosystem is off, nothing to configure");
+      core.info(`secure-registry: ${npmNotConfiguredReason(session)}, nothing to configure`);
     }
     return {};
   }
@@ -524,7 +533,7 @@ async function configureNpm(config: string, job: JobBinding): Promise<SecureRegi
 
   const registryUrl = session.registries?.npm;
   if (!registryUrl) {
-    core.info("secure-registry: npm is off, nothing to configure");
+    core.info(`secure-registry: ${npmNotConfiguredReason(session)}, nothing to configure`);
     return {};
   }
   let registry: URL;

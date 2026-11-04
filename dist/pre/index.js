@@ -86041,6 +86041,15 @@ var secure_registry_awaiter = (undefined && undefined.__awaiter) || function (th
 // Manager, so allow more than the 3s used for the other API calls.
 const SESSION_TIMEOUT_MS = 10000;
 const SKIP_SUFFIX = "npm stays on the default registry.";
+// Why the session gave npm no registry. The resolved config leaves out every
+// ecosystem not listed in `ecosystems`, and keeps a covered one with mode off.
+function npmNotConfiguredReason(session) {
+    var _a;
+    if ((_a = session.config) === null || _a === void 0 ? void 0 : _a.npm) {
+        return "npm is off";
+    }
+    return "npm is not listed in ecosystems";
+}
 // Returns the raw input to send to the session API, or undefined when the
 // feature is off. The action applies no defaults of its own.
 function secureRegistryInput(raw) {
@@ -86413,7 +86422,7 @@ function configureNpm(config, job) {
                 skipWarning("the session API returned no token");
             }
             else {
-                lib_core.info("secure-registry: every ecosystem is off, nothing to configure");
+                lib_core.info(`secure-registry: ${npmNotConfiguredReason(session)}, nothing to configure`);
             }
             return {};
         }
@@ -86431,7 +86440,7 @@ function configureNpm(config, job) {
         }
         const registryUrl = (_e = session.registries) === null || _e === void 0 ? void 0 : _e.npm;
         if (!registryUrl) {
-            lib_core.info("secure-registry: npm is off, nothing to configure");
+            lib_core.info(`secure-registry: ${npmNotConfiguredReason(session)}, nothing to configure`);
             return {};
         }
         let registry;
