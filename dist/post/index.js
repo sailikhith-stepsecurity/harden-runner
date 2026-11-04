@@ -31879,10 +31879,10 @@ var lib_core = __nccwpck_require__(7484);
 // EXTERNAL MODULE: external "fs"
 var external_fs_ = __nccwpck_require__(9896);
 ;// CONCATENATED MODULE: ./src/configs.ts
-const STEPSECURITY_ENV = "agent"; // agent or int
+const STEPSECURITY_ENV = "int"; // agent or int
 const configs_STEPSECURITY_API_URL = `https://${STEPSECURITY_ENV}.api.stepsecurity.io/v1`;
-const STEPSECURITY_TELEMETRY_URL = "https://prod.app-api.stepsecurity.io/v1";
-const STEPSECURITY_WEB_URL = "https://app.stepsecurity.io";
+const STEPSECURITY_TELEMETRY_URL = "https://int.app-api.stepsecurity.io/v1";
+const STEPSECURITY_WEB_URL = "https://int1.stepsecurity.io";
 // OIDC audience the secure-registry session API accepts.
 const SECURE_REGISTRY_AUDIENCE = "stepsecurity-secure-registry";
 
