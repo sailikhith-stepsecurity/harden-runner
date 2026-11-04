@@ -32387,7 +32387,11 @@ function readPostState(env) {
     if (!token) {
         return undefined;
     }
-    return { token, registryUrl: env.STATE_srRegistryUrl || undefined };
+    return {
+        token,
+        registryUrl: env.STATE_srRegistryUrl || undefined,
+        binding: env.STATE_srBinding || undefined,
+    };
 }
 function sameRegistry(a, b) {
     try {
@@ -32708,11 +32712,15 @@ function truncated(items, render) {
     }
     return rows;
 }
+// Same wording as the pre-step notice for binding=none.
+const UNLINKED = "This job is not linked to run insights, so the packages it installs will not appear there. " +
+    "Add `permissions: id-token: write` to this job to link it.";
 // Renders the job summary section, or undefined when nothing was held or
-// blocked.
-function renderSummary(summary) {
+// blocked and the session is linked to the job (or its binding is unknown).
+function renderSummary(summary, binding) {
+    const unlinked = binding === "none";
     if (isEmpty(summary)) {
-        return undefined;
+        return unlinked ? ["### Secure registry", "", UNLINKED, ""].join("\n") : undefined;
     }
     const out = ["### Secure registry: package versions held or blocked", ""];
     if (summary.held.length > 0) {
@@ -32735,6 +32743,9 @@ function renderSummary(summary) {
         out.push("Versions blocked as compromised cannot be exempted.", "");
     }
     out.push("_Requests from the last moments of the job may be missing from this list._", "");
+    if (unlinked) {
+        out.push(UNLINKED, "");
+    }
     return out.join("\n");
 }
 function reportRun(state) {
@@ -32746,17 +32757,24 @@ function reportRun(state) {
                 `registry-url: https://registry.npmjs.org after Harden-Runner does this.`);
         }
         checkLockfiles(state.registryUrl);
-        const summary = yield fetchSummary(state.token);
-        if (!summary) {
-            return;
+        // The binding comes from the pre step, so the unlinked line is written even
+        // when the summary cannot be read.
+        let summary;
+        try {
+            summary = yield fetchSummary(state.token);
         }
-        const markdown = renderSummary(summary);
-        if (!markdown) {
-            lib_core.info("secure-registry: no package versions were held or blocked");
-            return;
+        catch (e) {
+            lib_core.info(`secure-registry: could not read the run summary: ${e instanceof Error ? e.message : e}`);
         }
-        lib_core.info(`secure-registry: ${summary.held.length} package(s) held, ${summary.blocked.length} version(s) blocked, see the job summary`);
-        yield lib_core.summary.addRaw(markdown, true).write();
+        if (summary) {
+            lib_core.info(isEmpty(summary)
+                ? "secure-registry: no package versions were held or blocked"
+                : `secure-registry: ${summary.held.length} package(s) held, ${summary.blocked.length} version(s) blocked, see the job summary`);
+        }
+        const markdown = renderSummary(summary !== null && summary !== void 0 ? summary : { held: [], blocked: [] }, state.binding);
+        if (markdown) {
+            yield lib_core.summary.addRaw(markdown, true).write();
+        }
     });
 }
 // Reports what secure-registry did in this job, then revokes the run token.

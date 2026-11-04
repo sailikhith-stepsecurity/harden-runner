@@ -133,6 +133,11 @@ describe("readPostState", () => {
     expect(readPostState({ STATE_srToken: TOKEN })).toEqual({ token: TOKEN, registryUrl: undefined });
   });
 
+  test("binding", () => {
+    expect(readPostState({ STATE_srToken: TOKEN, STATE_srBinding: "none" })?.binding).toBe("none");
+    expect(readPostState({ STATE_srToken: TOKEN, STATE_srBinding: "" })?.binding).toBeUndefined();
+  });
+
   test("token and registry", () => {
     expect(readPostState({ STATE_srToken: TOKEN, STATE_srRegistryUrl: REGISTRY })).toEqual({
       token: TOKEN,
@@ -345,6 +350,36 @@ describe("renderSummary", () => {
     expect(md).not.toContain("```yaml");
   });
 
+  test("unlinked session with nothing held or blocked", () => {
+    expect(renderSummary(EMPTY, "none")).toBe(
+      [
+        "### Secure registry",
+        "",
+        "This job is not linked to run insights, so the packages it installs will not appear there. Add `permissions: id-token: write` to this job to link it.",
+        "",
+      ].join("\n")
+    );
+  });
+
+  test("linked or unknown binding with nothing held or blocked", () => {
+    for (const binding of ["oidc", "hr_key", "", undefined]) {
+      expect(renderSummary(EMPTY, binding)).toBeUndefined();
+    }
+  });
+
+  test("unlinked line follows the tables", () => {
+    const md = renderSummary(SUMMARY, "none")!;
+    expect(md).toContain("left-pad@1.3.1");
+    expect(md.trimEnd().endsWith("Add `permissions: id-token: write` to this job to link it.")).toBe(true);
+    expect(md.indexOf("may be missing from this list")).toBeLessThan(md.indexOf("not linked to run insights"));
+  });
+
+  test("no unlinked line for linked sessions", () => {
+    for (const binding of ["oidc", "hr_key", undefined]) {
+      expect(renderSummary(SUMMARY, binding)).not.toContain("not linked to run insights");
+    }
+  });
+
   test("long lists are cut", () => {
     const versions = Array.from({ length: 8 }, (_, i) => `1.0.${i}`);
     const blocked = Array.from({ length: 60 }, (_, i) => ({
@@ -424,6 +459,9 @@ describe("finishSecureRegistry", () => {
     npmrcFile = path.join(tmp, ".npmrc");
     fs.writeFileSync(npmrcFile, `registry=${REGISTRY}\n`);
     process.env.GITHUB_STEP_SUMMARY = summaryFile;
+    // core.summary keeps the first path it resolved; each test has its own.
+    (core.summary as unknown as { _filePath?: string })._filePath = undefined;
+    core.summary.emptyBuffer();
     process.env.NPM_CONFIG_USERCONFIG = npmrcFile;
     process.env.STATE_srToken = TOKEN;
     process.env.STATE_srRegistryUrl = REGISTRY;
@@ -462,8 +500,67 @@ describe("finishSecureRegistry", () => {
     mockFetchSequence([new Error("socket hang up"), noContent()]);
     await finishSecureRegistry();
     expect(fetchCalls.map((c) => c.url)).toEqual([SUMMARY_URL, REVOKE_URL]);
-    expect(logged()).toContain("post-step report failed: socket hang up");
+    expect(logged()).toContain("could not read the run summary: socket hang up");
     expect(fs.readFileSync(summaryFile, "utf8")).toBe("");
+  });
+
+  describe("binding", () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    // An empty first answer is asked again after a delay; skip the wait.
+    async function finishWithEmptySummary() {
+      jest.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void) => {
+        fn();
+        return 0;
+      }) as unknown as typeof setTimeout);
+      mockFetchSequence([jsonResponse(200, EMPTY), jsonResponse(200, EMPTY), noContent()]);
+      await finishSecureRegistry();
+      expect(fetchCalls.map((c) => c.url)).toEqual([SUMMARY_URL, SUMMARY_URL, REVOKE_URL]);
+    }
+
+    test("unlinked line when nothing was held or blocked", async () => {
+      process.env.STATE_srBinding = "none";
+      await finishWithEmptySummary();
+      const written = fs.readFileSync(summaryFile, "utf8");
+      expect(written).toContain("### Secure registry");
+      expect(written).toContain("This job is not linked to run insights");
+      expect(logged()).toContain("no package versions were held or blocked");
+    });
+
+    test("nothing written for a linked session with nothing held or blocked", async () => {
+      process.env.STATE_srBinding = "hr_key";
+      await finishWithEmptySummary();
+      expect(fs.readFileSync(summaryFile, "utf8")).toBe("");
+    });
+
+    test("unlinked line with the tables", async () => {
+      process.env.STATE_srBinding = "none";
+      mockFetchSequence([jsonResponse(200, SUMMARY), noContent()]);
+      await finishSecureRegistry();
+      const written = fs.readFileSync(summaryFile, "utf8");
+      expect(written).toContain("left-pad@1.3.1");
+      expect(written).toContain("This job is not linked to run insights");
+    });
+
+    test("unlinked line when the summary cannot be read", async () => {
+      process.env.STATE_srBinding = "none";
+      mockFetchSequence([jsonResponse(500, {}), noContent()]);
+      await finishSecureRegistry();
+      expect(fetchCalls.map((c) => c.url)).toEqual([SUMMARY_URL, REVOKE_URL]);
+      expect(fs.readFileSync(summaryFile, "utf8")).toContain("This job is not linked to run insights");
+      expect(logged()).not.toContain("no package versions were held or blocked");
+    });
+
+    test("no line when npm was not configured", async () => {
+      process.env.STATE_srBinding = "none";
+      delete process.env.STATE_srRegistryUrl;
+      mockFetchSequence([noContent()]);
+      await finishSecureRegistry();
+      expect(fetchCalls.map((c) => c.url)).toEqual([REVOKE_URL]);
+      expect(fs.readFileSync(summaryFile, "utf8")).toBe("");
+    });
   });
 
   test("notice when setup-node replaced our registry", async () => {

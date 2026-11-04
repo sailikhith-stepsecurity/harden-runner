@@ -22,6 +22,9 @@ const ECOSYSTEM_CONFIG_KEYS: Record<string, string> = { javascript: "npm" };
 export interface PostState {
   token: string;
   registryUrl?: string;
+  // How the session API tied the session to this job: oidc, hr_key or none.
+  // Missing when the pre step predates bindings.
+  binding?: string;
 }
 
 export interface ControlResult {
@@ -55,7 +58,11 @@ export function readPostState(env: NodeJS.ProcessEnv): PostState | undefined {
   if (!token) {
     return undefined;
   }
-  return { token, registryUrl: env.STATE_srRegistryUrl || undefined };
+  return {
+    token,
+    registryUrl: env.STATE_srRegistryUrl || undefined,
+    binding: env.STATE_srBinding || undefined,
+  };
 }
 
 function sameRegistry(a: string, b: string): boolean {
@@ -390,11 +397,17 @@ function truncated<T>(items: T[], render: (item: T) => string): string[] {
   return rows;
 }
 
+// Same wording as the pre-step notice for binding=none.
+const UNLINKED =
+  "This job is not linked to run insights, so the packages it installs will not appear there. " +
+  "Add `permissions: id-token: write` to this job to link it.";
+
 // Renders the job summary section, or undefined when nothing was held or
-// blocked.
-export function renderSummary(summary: RunSummary): string | undefined {
+// blocked and the session is linked to the job (or its binding is unknown).
+export function renderSummary(summary: RunSummary, binding?: string): string | undefined {
+  const unlinked = binding === "none";
   if (isEmpty(summary)) {
-    return undefined;
+    return unlinked ? ["### Secure registry", "", UNLINKED, ""].join("\n") : undefined;
   }
   const out: string[] = ["### Secure registry: package versions held or blocked", ""];
 
@@ -444,6 +457,9 @@ export function renderSummary(summary: RunSummary): string | undefined {
     out.push("Versions blocked as compromised cannot be exempted.", "");
   }
   out.push("_Requests from the last moments of the job may be missing from this list._", "");
+  if (unlinked) {
+    out.push(UNLINKED, "");
+  }
   return out.join("\n");
 }
 
@@ -459,19 +475,25 @@ async function reportRun(state: PostState & { registryUrl: string }) {
 
   checkLockfiles(state.registryUrl);
 
-  const summary = await fetchSummary(state.token);
-  if (!summary) {
-    return;
+  // The binding comes from the pre step, so the unlinked line is written even
+  // when the summary cannot be read.
+  let summary: RunSummary | undefined;
+  try {
+    summary = await fetchSummary(state.token);
+  } catch (e) {
+    core.info(`secure-registry: could not read the run summary: ${e instanceof Error ? e.message : e}`);
   }
-  const markdown = renderSummary(summary);
-  if (!markdown) {
-    core.info("secure-registry: no package versions were held or blocked");
-    return;
+  if (summary) {
+    core.info(
+      isEmpty(summary)
+        ? "secure-registry: no package versions were held or blocked"
+        : `secure-registry: ${summary.held.length} package(s) held, ${summary.blocked.length} version(s) blocked, see the job summary`
+    );
   }
-  core.info(
-    `secure-registry: ${summary.held.length} package(s) held, ${summary.blocked.length} version(s) blocked, see the job summary`
-  );
-  await core.summary.addRaw(markdown, true).write();
+  const markdown = renderSummary(summary ?? { held: [], blocked: [] }, state.binding);
+  if (markdown) {
+    await core.summary.addRaw(markdown, true).write();
+  }
 }
 
 // Reports what secure-registry did in this job, then revokes the run token.
