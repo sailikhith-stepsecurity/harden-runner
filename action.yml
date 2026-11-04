@@ -57,9 +57,13 @@ inputs:
     required: false
     default: ""
   secure-registry:
-    description: "Route npm installs in this job through StepSecurity secure-registry. Set to true for the default settings, or to a YAML block with per-ecosystem settings. Requires id-token: write permission. Leave empty or set to false to disable."
+    description: "Route npm installs in this job through StepSecurity secure-registry. Set to true for the default settings, or to a YAML block with per-ecosystem settings. id-token: write permission is recommended so GitHub verifies the job's identity. Leave empty or set to false to disable."
     required: false
     default: ""
+  check-run-id:
+    description: "Internal, do not set. The job's check run ID, used by secure-registry to identify the job when no OIDC token is available."
+    required: false
+    default: ${{ job.check_run_id }}
 
 branding:
   icon: "check-square"
