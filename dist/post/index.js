@@ -32374,8 +32374,8 @@ const REVOKE_TIMEOUT_MS = 5000;
 // Audit rows reach the summary through a queue, so an empty first answer is
 // asked again once after this delay.
 const SUMMARY_RETRY_DELAY_MS = 3000;
-// Keeps the job summary readable when a job pulls many fresh versions.
-const MAX_ROWS = 50;
+// Rows per table. The full list is on the run insights Packages tab.
+const MAX_ROWS = 5;
 const MAX_VERSIONS_SHOWN = 5;
 const LOCKFILE_NAMES = ["package-lock.json", "npm-shrinkwrap.json"];
 // Summary ecosystem values are registry paths; the input keys differ.
@@ -32387,11 +32387,32 @@ function readPostState(env) {
     if (!token) {
         return undefined;
     }
+    const days = env.STATE_srCooldownDays ? Number(env.STATE_srCooldownDays) : NaN;
     return {
         token,
         registryUrl: env.STATE_srRegistryUrl || undefined,
         binding: env.STATE_srBinding || undefined,
+        cooldownDays: Number.isInteger(days) && days >= 0 ? days : undefined,
+        correlationId: env.STATE_correlation_id || undefined,
     };
+}
+// Links to this job's packages on the run insights Packages tab. Only jobs
+// whose session is bound to them have rows there, and the page needs the
+// job's correlation ID.
+function insightsPackagesUrl(env, state, checkRunId) {
+    const repository = env.GITHUB_REPOSITORY;
+    const runId = env.GITHUB_RUN_ID;
+    if (state.binding !== "oidc" && state.binding !== "hr_key")
+        return undefined;
+    if (!repository || !runId || !state.correlationId || !/^\d+$/.test(checkRunId))
+        return undefined;
+    const params = new URLSearchParams({
+        tab: "packages",
+        correlationId: state.correlationId,
+        utm_source: "markdown",
+        jobId: checkRunId,
+    });
+    return `${STEPSECURITY_WEB_URL}/github/${repository}/actions/runs/${runId}?${params}`;
 }
 function sameRegistry(a, b) {
     try {
@@ -32512,7 +32533,7 @@ function checkLockfiles(registryUrl) {
 }
 function getSummary(token) {
     return secure_registry_post_awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
+        var _a, _b, _c;
         const resp = yield fetch(`${configs_STEPSECURITY_API_URL}/secure-registry/sessions/summary`, {
             headers: { authorization: `Bearer ${token}` },
             signal: AbortSignal.timeout(SUMMARY_TIMEOUT_MS),
@@ -32522,11 +32543,12 @@ function getSummary(token) {
             return undefined;
         }
         const body = (yield resp.json());
-        return { held: (_a = body.held) !== null && _a !== void 0 ? _a : [], blocked: (_b = body.blocked) !== null && _b !== void 0 ? _b : [] };
+        return { held: (_a = body.held) !== null && _a !== void 0 ? _a : [], blocked: (_b = body.blocked) !== null && _b !== void 0 ? _b : [], wouldBlock: (_c = body.would_block) !== null && _c !== void 0 ? _c : [] };
     });
 }
 function isEmpty(summary) {
-    return summary.held.length === 0 && summary.blocked.length === 0;
+    var _a;
+    return summary.held.length === 0 && summary.blocked.length === 0 && ((_a = summary.wouldBlock) !== null && _a !== void 0 ? _a : []).length === 0;
 }
 function fetchSummary(token_1) {
     return secure_registry_post_awaiter(this, arguments, void 0, function* (token, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
@@ -32705,39 +32727,67 @@ function exemptionSnippet(exemptions) {
     }
     return lines.join("\n");
 }
-function truncated(items, render) {
-    const rows = items.slice(0, MAX_ROWS).map(render);
+function byPackage(a, b) {
+    return a.package < b.package ? -1 : a.package > b.package ? 1 : 0;
+}
+function byPackageVersion(a, b) {
+    return byPackage(a, b) || compareVersions(a.version, b.version);
+}
+// A markdown table of at most MAX_ROWS rows. When rows are cut, a line under
+// it says so and links to the job's full list in run insights, if there is one.
+function table(header, items, render, insightsUrl) {
+    const out = [header, "|---|---|---|", ...items.slice(0, MAX_ROWS).map(render), ""];
     if (items.length > MAX_ROWS) {
-        rows.push(`| ... and ${items.length - MAX_ROWS} more | | |`);
+        const all = insightsUrl ? ` [See all packages for this job in run insights](${insightsUrl}).` : "";
+        out.push(`Showing ${MAX_ROWS} of ${items.length}.${all}`, "");
     }
-    return rows;
+    return out;
+}
+function blockedRow(b) {
+    const label = b.version ? `${b.package}@${b.version}` : b.package;
+    return `| \`${cell(label)}\` | ${cell(controlNames(b.controls))} | ${cell(blockedDetails(b))} |`;
+}
+function days(n) {
+    return n === 1 ? "1 day" : `${n} days`;
 }
 // Same wording as the pre-step notice for binding=none.
 const UNLINKED = "This job is not linked to run insights, so the packages it installs will not appear there. " +
     "Add `permissions: id-token: write` to this job to link it.";
-// Renders the job summary section, or undefined when nothing was held or
-// blocked and the session is linked to the job (or its binding is unknown).
-function renderSummary(summary, binding) {
-    const unlinked = binding === "none";
+// Renders the job summary section, or undefined when nothing was held,
+// blocked or would have been blocked, and the session is linked to the job
+// (or its binding is unknown).
+function renderSummary(summary, options = {}) {
+    var _a;
+    const unlinked = options.binding === "none";
     if (isEmpty(summary)) {
         return unlinked ? ["### Secure registry", "", UNLINKED, ""].join("\n") : undefined;
     }
-    const out = ["### Secure registry: package versions held or blocked", ""];
+    const cooldown = options.cooldownDays && options.cooldownDays > 0 ? options.cooldownDays : undefined;
+    const out = ["### Secure registry", ""];
+    if (summary.blocked.length > 0) {
+        out.push("**Blocked.** Downloads of these versions were refused.", "", ...table("| Version | Control | Details |", [...summary.blocked].sort(byPackageVersion), blockedRow, options.insightsUrl));
+    }
     if (summary.held.length > 0) {
-        out.push("**Held.** These versions were hidden from npm, so it used an older version or failed with ETARGET (\"No matching version found\").", "", "| Package | Hidden versions | Reason |", "|---|---|---|", ...truncated(summary.held, (h) => {
+        const heldByCooldown = summary.held.some((h) => h.controls.some((c) => c.name === "cooldown"));
+        const window = cooldown && heldByCooldown ? ` The cooldown for this job is ${days(cooldown)}.` : "";
+        out.push(`**Held.** These versions were hidden from npm, so it used an older version or failed with ETARGET ("No matching version found").${window}`, "", ...table("| Package | Hidden versions | Reason |", [...summary.held].sort(byPackage), (h) => {
             const sorted = [...h.versions].sort(compareVersions).reverse();
             const shown = sorted.slice(0, MAX_VERSIONS_SHOWN).map((v) => `\`${v}\``).join(", ");
             const more = sorted.length > MAX_VERSIONS_SHOWN ? ` and ${sorted.length - MAX_VERSIONS_SHOWN} more` : "";
             const reason = h.controls.map((c) => c.reason || c.name).join("; ");
             return `| \`${cell(h.package)}\` | ${shown}${more} | ${cell(reason)} |`;
-        }), "");
+        }, options.insightsUrl));
     }
-    if (summary.blocked.length > 0) {
-        out.push("**Blocked.** Downloads of these versions were refused.", "", "| Version | Control | Details |", "|---|---|---|", ...truncated(summary.blocked, (b) => `| \`${cell(b.package)}@${cell(b.version)}\` | ${cell(controlNames(b.controls))} | ${cell(blockedDetails(b))} |`), "");
+    const wouldBlock = (_a = summary.wouldBlock) !== null && _a !== void 0 ? _a : [];
+    if (wouldBlock.length > 0) {
+        out.push("**Would be blocked.** This job runs secure-registry in audit mode, so these downloads were allowed. In enforce mode they would have been refused.", "", ...table("| Version | Control | Details |", [...wouldBlock].sort(byPackageVersion), blockedRow, options.insightsUrl));
     }
+    // Lists every version, even when the tables are cut: a partial list would
+    // fail the rerun on the next one.
     const exemptions = suggestedExemptions(summary);
     if (exemptions.size > 0) {
-        out.push("To allow these versions now, add them to the `secure-registry` input, merged with any settings you already have. Each entry allows that one release only, so later releases stay covered. You can also rerun the job once the cooldown has passed.", "", "```yaml", exemptionSnippet(exemptions), "```", "");
+        const passed = cooldown ? `the ${cooldown}-day cooldown` : "the cooldown";
+        out.push(`To allow these versions now, add them to the \`secure-registry\` input, merged with any settings you already have. Each entry allows that one release only, so later releases stay covered. You can also rerun the job once ${passed} has passed.`, "", "```yaml", exemptionSnippet(exemptions), "```", "");
     }
     if (summary.blocked.some((b) => b.controls.some((c) => c.name === "compromised"))) {
         out.push("Versions blocked as compromised cannot be exempted.", "");
@@ -32750,6 +32800,7 @@ function renderSummary(summary, binding) {
 }
 function reportRun(state) {
     return secure_registry_post_awaiter(this, void 0, void 0, function* () {
+        var _a;
         const override = registryOverride(process.env, state.registryUrl);
         if (override) {
             lib_core.notice(`secure-registry: npm stopped using secure-registry during this job (${override}), ` +
@@ -32767,11 +32818,16 @@ function reportRun(state) {
             lib_core.info(`secure-registry: could not read the run summary: ${e instanceof Error ? e.message : e}`);
         }
         if (summary) {
+            const wouldBlock = ((_a = summary.wouldBlock) === null || _a === void 0 ? void 0 : _a.length) ? `, ${summary.wouldBlock.length} would be blocked in enforce mode` : "";
             lib_core.info(isEmpty(summary)
                 ? "secure-registry: no package versions were held or blocked"
-                : `secure-registry: ${summary.held.length} package(s) held, ${summary.blocked.length} version(s) blocked, see the job summary`);
+                : `secure-registry: ${summary.held.length} package(s) held, ${summary.blocked.length} version(s) blocked${wouldBlock}, see the job summary`);
         }
-        const markdown = renderSummary(summary !== null && summary !== void 0 ? summary : { held: [], blocked: [] }, state.binding);
+        const markdown = renderSummary(summary !== null && summary !== void 0 ? summary : { held: [], blocked: [] }, {
+            binding: state.binding,
+            cooldownDays: state.cooldownDays,
+            insightsUrl: insightsPackagesUrl(process.env, state, lib_core.getInput("check-run-id")),
+        });
         if (markdown) {
             yield lib_core.summary.addRaw(markdown, true).write();
         }
