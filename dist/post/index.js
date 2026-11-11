@@ -32687,22 +32687,26 @@ function blockedDetails(b) {
 }
 // Picks one exact version per held or blocked package that cooldown alone
 // kept out: the version npm asked to download, or else the newest hidden
-// one. A single release keeps later releases covered by cooldown.
+// one. A single release keeps later releases covered by cooldown. Blocked
+// versions come first (each sorted): a refused download is what fails the
+// install, while npm can often fall back past a held version.
 function suggestedExemptions(summary) {
-    const byKey = new Map();
+    var _a, _b;
+    const blocked = new Map();
+    const held = new Map();
     const covered = new Set();
-    const add = (ecosystem, spec) => {
+    const add = (into, ecosystem, spec) => {
         const key = ECOSYSTEM_CONFIG_KEYS[ecosystem];
         if (!key)
             return;
-        if (!byKey.has(key))
-            byKey.set(key, new Set());
-        byKey.get(key).add(spec);
+        if (!into.has(key))
+            into.set(key, new Set());
+        into.get(key).add(spec);
     };
     for (const b of summary.blocked) {
         covered.add(`${b.ecosystem}\0${b.package}`);
         if (onlyCooldown(b.controls) && b.version) {
-            add(b.ecosystem, `${b.package}@${b.version}`);
+            add(blocked, b.ecosystem, `${b.package}@${b.version}`);
         }
     }
     for (const h of summary.held) {
@@ -32711,19 +32715,25 @@ function suggestedExemptions(summary) {
         if (!onlyCooldown(h.controls) || h.versions.length === 0)
             continue;
         const newest = [...h.versions].sort(compareVersions).pop();
-        add(h.ecosystem, `${h.package}@${newest}`);
+        add(held, h.ecosystem, `${h.package}@${newest}`);
     }
     const out = new Map();
-    for (const [key, specs] of byKey)
-        out.set(key, [...specs].sort());
+    for (const key of new Set([...blocked.keys(), ...held.keys()])) {
+        out.set(key, [...[...((_a = blocked.get(key)) !== null && _a !== void 0 ? _a : [])].sort(), ...[...((_b = held.get(key)) !== null && _b !== void 0 ? _b : [])].sort()]);
+    }
     return out;
 }
-function exemptionSnippet(exemptions) {
+// The exemption snippet with at most `max` entries in all, taken in order.
+function exemptionSnippet(exemptions, max) {
     const lines = ["secure-registry: |"];
+    let left = max;
     for (const [key, specs] of exemptions) {
+        if (left <= 0)
+            break;
         lines.push(`  ${key}:`, "    cooldown:", "      exemptions:");
-        for (const spec of specs)
+        for (const spec of specs.slice(0, left))
             lines.push(`        - "${spec}"`);
+        left -= specs.length;
     }
     return lines.join("\n");
 }
@@ -32736,12 +32746,14 @@ function byPackageVersion(a, b) {
 // A markdown table of at most MAX_ROWS rows. When rows are cut, a line under
 // it says so and links to the job's full list in run insights, if there is one.
 function table(header, items, render, insightsUrl) {
-    const out = [header, "|---|---|---|", ...items.slice(0, MAX_ROWS).map(render), ""];
-    if (items.length > MAX_ROWS) {
-        const all = insightsUrl ? ` [See all packages for this job in run insights](${insightsUrl}).` : "";
-        out.push(`Showing ${MAX_ROWS} of ${items.length}.${all}`, "");
-    }
-    return out;
+    return [header, "|---|---|---|", ...items.slice(0, MAX_ROWS).map(render), "", ...showing(items.length, "", insightsUrl)];
+}
+// "Showing 5 of N." under a list cut at MAX_ROWS, or nothing when it wasn't.
+function showing(total, noun, insightsUrl) {
+    if (total <= MAX_ROWS)
+        return [];
+    const all = insightsUrl ? ` [See all packages for this job in run insights](${insightsUrl}).` : "";
+    return [`Showing ${MAX_ROWS} of ${total}${noun}.${all}`, ""];
 }
 function blockedRow(b) {
     const label = b.version ? `${b.package}@${b.version}` : b.package;
@@ -32782,12 +32794,12 @@ function renderSummary(summary, options = {}) {
     if (wouldBlock.length > 0) {
         out.push("**Would be blocked.** This job runs secure-registry in audit mode, so these downloads were allowed. In enforce mode they would have been refused.", "", ...table("| Version | Control | Details |", [...wouldBlock].sort(byPackageVersion), blockedRow, options.insightsUrl));
     }
-    // Lists every version, even when the tables are cut: a partial list would
-    // fail the rerun on the next one.
+    // Cut at MAX_ROWS like the tables, blocked versions first.
     const exemptions = suggestedExemptions(summary);
+    const exemptionCount = [...exemptions.values()].reduce((n, specs) => n + specs.length, 0);
     if (exemptions.size > 0) {
         const passed = cooldown ? `the ${cooldown}-day cooldown` : "the cooldown";
-        out.push(`To allow these versions now, add them to the \`secure-registry\` input, merged with any settings you already have. Each entry allows that one release only, so later releases stay covered. You can also rerun the job once ${passed} has passed.`, "", "```yaml", exemptionSnippet(exemptions), "```", "");
+        out.push(`To allow these versions now, add them to the \`secure-registry\` input, merged with any settings you already have. Each entry allows that one release only, so later releases stay covered. You can also rerun the job once ${passed} has passed.`, "", "```yaml", exemptionSnippet(exemptions, MAX_ROWS), "```", "", ...showing(exemptionCount, " exemptions", options.insightsUrl));
     }
     if (summary.blocked.some((b) => b.controls.some((c) => c.name === "compromised"))) {
         out.push("Versions blocked as compromised cannot be exempted.", "");

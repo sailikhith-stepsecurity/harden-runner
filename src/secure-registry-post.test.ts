@@ -313,6 +313,22 @@ describe("suggestedExemptions", () => {
     );
   });
 
+  test("blocked versions come first, each part sorted", () => {
+    const summary: RunSummary = {
+      held: [
+        { ecosystem: "javascript", package: "b-held", versions: ["1.0.0"], controls: [{ name: "cooldown" }] },
+        { ecosystem: "javascript", package: "a-held", versions: ["1.0.0"], controls: [{ name: "cooldown" }] },
+      ],
+      blocked: [
+        { ecosystem: "javascript", package: "z-blocked", version: "1.0.0", controls: [{ name: "cooldown" }] },
+        { ecosystem: "javascript", package: "y-blocked", version: "1.0.0", controls: [{ name: "cooldown" }] },
+      ],
+    };
+    expect(suggestedExemptions(summary)).toEqual(
+      new Map([["npm", ["y-blocked@1.0.0", "z-blocked@1.0.0", "a-held@1.0.0", "b-held@1.0.0"]]])
+    );
+  });
+
   test("a blocked version wins over the newest hidden one", () => {
     const summary: RunSummary = {
       held: [{ ecosystem: "javascript", package: "left-pad", versions: ["1.3.2", "1.3.1"], controls: [{ name: "cooldown" }] }],
@@ -500,10 +516,26 @@ describe("renderSummary", () => {
       expect(md).not.toContain("and 7 more |");
     });
 
-    test("the exemption snippet still lists every version", () => {
-      const md = renderSummary({ held, blocked })!;
-      for (let i = 0; i < 12; i++) expect(md).toContain(`- "p${String(i).padStart(2, "0")}@1.0.0"`);
-      for (let i = 0; i < 6; i++) expect(md).toContain(`- "h${i}@2.0.0"`);
+    test("the exemption snippet shows 5 entries, blocked first, and links to run insights", () => {
+      const md = renderSummary({ held, blocked }, { insightsUrl: INSIGHTS })!;
+      for (let i = 0; i < 5; i++) expect(md).toContain(`- "p0${i}@1.0.0"`);
+      expect(md).not.toContain(`- "p05@1.0.0"`);
+      expect(md).not.toContain(`- "h0@2.0.0"`);
+      expect(md).toContain(
+        `\`\`\`\n\nShowing 5 of 18 exemptions. [See all packages for this job in run insights](${INSIGHTS}).`
+      );
+    });
+
+    test("held versions fill the snippet after blocked ones", () => {
+      const md = renderSummary({ held, blocked: blocked.slice(0, 3) })!;
+      expect(md).toContain(['        - "p02@1.0.0"', '        - "h0@2.0.0"', '        - "h1@2.0.0"', "```"].join("\n"));
+      expect(md).toContain("Showing 5 of 9 exemptions.\n");
+    });
+
+    test("no exemptions line when the snippet is not cut", () => {
+      const md = renderSummary({ held: [], blocked: blocked.slice(0, 5) }, { insightsUrl: INSIGHTS })!;
+      expect(md).toContain('- "p04@1.0.0"');
+      expect(md).not.toContain("exemptions.");
     });
 
     test("no link without an insights URL", () => {
