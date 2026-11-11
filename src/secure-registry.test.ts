@@ -371,6 +371,7 @@ describe("setupSecureRegistry", () => {
       srBinding: "oidc",
       srRegistryUrl: REGISTRY,
       srNpmrcPath: npmrcPath(),
+      srCooldownDays: "2",
     });
     expect(mockedCore.notice).toHaveBeenCalledWith("secure-registry: pypi is not supported yet (pypi)");
     expect(mockedCore.warning).not.toHaveBeenCalled();
@@ -441,6 +442,22 @@ describe("setupSecureRegistry", () => {
     await setupSecureRegistry();
 
     expect(fs.readFileSync(npmrcPath(), "utf8")).toContain("\nomit-lockfile-registry-resolved=true\n");
+  });
+
+  test("saves npm's cooldown days for the post step", async () => {
+    mockFetchSequence([created({ config: { npm: { mode: "enforce", cooldown: { days: 0, exemptions: [] } } } })]);
+    await setupSecureRegistry();
+    expect(readState().srCooldownDays).toBe("0");
+  });
+
+  test("no cooldown state when the config has no usable cooldown", async () => {
+    for (const cooldown of [undefined, {}, { days: "2" }, { days: -1 }]) {
+      fs.writeFileSync(stateFile, "");
+      mockFetchSequence([created({ config: { npm: { mode: "enforce", cooldown } } })]);
+      await setupSecureRegistry();
+      expect(readState()).toHaveProperty("srRegistryUrl", REGISTRY);
+      expect(readState()).not.toHaveProperty("srCooldownDays");
+    }
   });
 
   describe("does not switch a registry the user chose", () => {

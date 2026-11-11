@@ -36,7 +36,7 @@ interface SessionResponse {
   binding?: string;
   edition?: string;
   registries?: Record<string, string>;
-  config?: Record<string, { mode?: string; lockfile_resolved?: string }>;
+  config?: Record<string, { mode?: string; lockfile_resolved?: string; cooldown?: { days?: number } }>;
   notices?: SessionNotice[];
 }
 
@@ -561,6 +561,12 @@ async function configureNpm(config: string, job: JobBinding): Promise<SecureRegi
 
   saveState("srRegistryUrl", registryUrl);
   saveState("srNpmrcPath", target);
+  // The audit rows for held versions do not say how long the cooldown is, so
+  // the post step takes it from here.
+  const cooldownDays = session.config?.npm?.cooldown?.days;
+  if (typeof cooldownDays === "number" && Number.isInteger(cooldownDays) && cooldownDays >= 0) {
+    saveState("srCooldownDays", String(cooldownDays));
+  }
 
   if (preflight.source.content !== "") {
     core.info(`secure-registry: merged existing npm config from ${preflight.source.path}`);

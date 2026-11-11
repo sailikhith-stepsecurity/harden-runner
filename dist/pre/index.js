@@ -86381,7 +86381,7 @@ function sessionAuth() {
 }
 function configureNpm(config, job) {
     return secure_registry_awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g, _h;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
         if (isGHES()) {
             skipNotice("not supported on GitHub Enterprise Server yet");
             return {};
@@ -86447,7 +86447,7 @@ function configureNpm(config, job) {
         try {
             registry = new URL(registryUrl);
         }
-        catch (_j) {
+        catch (_m) {
             skipWarning(`the session API returned an invalid npm registry URL`);
             return {};
         }
@@ -86467,6 +86467,12 @@ function configureNpm(config, job) {
         lib_core.exportVariable((_h = preflight.source.envKey) !== null && _h !== void 0 ? _h : "NPM_CONFIG_USERCONFIG", target);
         saveState("srRegistryUrl", registryUrl);
         saveState("srNpmrcPath", target);
+        // The audit rows for held versions do not say how long the cooldown is, so
+        // the post step takes it from here.
+        const cooldownDays = (_l = (_k = (_j = session.config) === null || _j === void 0 ? void 0 : _j.npm) === null || _k === void 0 ? void 0 : _k.cooldown) === null || _l === void 0 ? void 0 : _l.days;
+        if (typeof cooldownDays === "number" && Number.isInteger(cooldownDays) && cooldownDays >= 0) {
+            saveState("srCooldownDays", String(cooldownDays));
+        }
         if (preflight.source.content !== "") {
             lib_core.info(`secure-registry: merged existing npm config from ${preflight.source.path}`);
         }

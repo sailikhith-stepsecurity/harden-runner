@@ -3,7 +3,7 @@ import * as cp from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { STEPSECURITY_API_URL } from "./configs";
+import { STEPSECURITY_API_URL, STEPSECURITY_WEB_URL } from "./configs";
 import {
   RunSummary,
   changedFiles,
@@ -11,6 +11,7 @@ import {
   cooldownTiming,
   fetchSummary,
   finishSecureRegistry,
+  insightsPackagesUrl,
   leakedLockfiles,
   readPostState,
   registryOverride,
@@ -143,6 +144,18 @@ describe("readPostState", () => {
       token: TOKEN,
       registryUrl: REGISTRY,
     });
+  });
+
+  test("cooldown days", () => {
+    const days = (v?: string) => readPostState({ STATE_srToken: TOKEN, STATE_srCooldownDays: v })?.cooldownDays;
+    expect(days("2")).toBe(2);
+    expect(days("0")).toBe(0);
+    for (const v of [undefined, "", "abc", "-1", "1.5"]) expect(days(v)).toBeUndefined();
+  });
+
+  test("correlation ID", () => {
+    expect(readPostState({ STATE_srToken: TOKEN, STATE_correlation_id: "abc" })?.correlationId).toBe("abc");
+    expect(readPostState({ STATE_srToken: TOKEN })?.correlationId).toBeUndefined();
   });
 });
 
@@ -351,7 +364,7 @@ describe("renderSummary", () => {
   });
 
   test("unlinked session with nothing held or blocked", () => {
-    expect(renderSummary(EMPTY, "none")).toBe(
+    expect(renderSummary(EMPTY, { binding: "none" })).toBe(
       [
         "### Secure registry",
         "",
@@ -363,12 +376,12 @@ describe("renderSummary", () => {
 
   test("linked or unknown binding with nothing held or blocked", () => {
     for (const binding of ["oidc", "hr_key", "", undefined]) {
-      expect(renderSummary(EMPTY, binding)).toBeUndefined();
+      expect(renderSummary(EMPTY, { binding })).toBeUndefined();
     }
   });
 
   test("unlinked line follows the tables", () => {
-    const md = renderSummary(SUMMARY, "none")!;
+    const md = renderSummary(SUMMARY, { binding: "none" })!;
     expect(md).toContain("left-pad@1.3.1");
     expect(md.trimEnd().endsWith("Add `permissions: id-token: write` to this job to link it.")).toBe(true);
     expect(md.indexOf("may be missing from this list")).toBeLessThan(md.indexOf("not linked to run insights"));
@@ -376,25 +389,163 @@ describe("renderSummary", () => {
 
   test("no unlinked line for linked sessions", () => {
     for (const binding of ["oidc", "hr_key", undefined]) {
-      expect(renderSummary(SUMMARY, binding)).not.toContain("not linked to run insights");
+      expect(renderSummary(SUMMARY, { binding })).not.toContain("not linked to run insights");
     }
   });
 
-  test("long lists are cut", () => {
-    const versions = Array.from({ length: 8 }, (_, i) => `1.0.${i}`);
-    const blocked = Array.from({ length: 60 }, (_, i) => ({
-      ecosystem: "javascript",
-      package: `p${i}`,
-      version: "1.0.0",
-      controls: [{ name: "block_list", reason: "a|b" }],
-    }));
+  test("blocked comes before held, each sorted by package", () => {
     const md = renderSummary({
-      held: [{ ecosystem: "javascript", package: "many", versions, controls: [{ name: "cooldown" }] }],
-      blocked,
+      held: [
+        { ecosystem: "javascript", package: "zod", versions: ["4.0.0"], controls: [{ name: "cooldown" }] },
+        { ecosystem: "javascript", package: "chalk", versions: ["6.0.0"], controls: [{ name: "cooldown" }] },
+      ],
+      blocked: [
+        { ecosystem: "javascript", package: "ms", version: "2.1.4", controls: [{ name: "cooldown" }] },
+        { ecosystem: "javascript", package: "debug", version: "4.3.5", controls: [{ name: "cooldown" }] },
+        { ecosystem: "javascript", package: "debug", version: "4.3.4", controls: [{ name: "compromised" }] },
+      ],
     })!;
-    expect(md).toContain("`1.0.7`, `1.0.6`, `1.0.5`, `1.0.4`, `1.0.3` and 3 more");
-    expect(md).toContain("| ... and 10 more | | |");
-    expect(md).toContain("a\\|b");
+    const order = ["**Blocked.**", "`debug@4.3.4`", "`debug@4.3.5`", "`ms@2.1.4`", "**Held.**", "`chalk`", "`zod`"].map((s) =>
+      md.indexOf(s)
+    );
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(md.startsWith("### Secure registry\n")).toBe(true);
+  });
+
+  describe("cooldown window", () => {
+    test("held intro and rerun line say how long the cooldown is", () => {
+      const md = renderSummary(SUMMARY, { cooldownDays: 2 })!;
+      expect(md).toContain(
+        '**Held.** These versions were hidden from npm, so it used an older version or failed with ETARGET ("No matching version found"). The cooldown for this job is 2 days.'
+      );
+      expect(md).toContain("You can also rerun the job once the 2-day cooldown has passed.");
+    });
+
+    test("one day", () => {
+      expect(renderSummary(SUMMARY, { cooldownDays: 1 })).toContain("The cooldown for this job is 1 day.");
+    });
+
+    test("unknown or off: today's wording", () => {
+      for (const cooldownDays of [undefined, 0]) {
+        const md = renderSummary(SUMMARY, { cooldownDays })!;
+        expect(md).not.toContain("The cooldown for this job is");
+        expect(md).toContain("You can also rerun the job once the cooldown has passed.");
+      }
+    });
+
+    test("no window in the held intro when cooldown held nothing", () => {
+      const md = renderSummary(
+        {
+          held: [{ ecosystem: "javascript", package: "debug", versions: ["4.3.4"], controls: [{ name: "compromised" }] }],
+          blocked: [],
+        },
+        { cooldownDays: 2 }
+      )!;
+      expect(md).toContain("**Held.**");
+      expect(md).not.toContain("The cooldown for this job is");
+    });
+  });
+
+  describe("would be blocked (audit mode)", () => {
+    const wouldBlock = [
+      { ecosystem: "javascript", package: "minimatch", version: "", controls: [{ name: "custom_block_list", reason: "'minimatch' matches a configured block list pattern" }] },
+      { ecosystem: "javascript", package: "left-pad", version: "1.3.1", controls: [{ name: "cooldown", reason: COOLDOWN_REASON }] },
+    ];
+
+    test("listed on their own, after blocked and held", () => {
+      const md = renderSummary({ ...SUMMARY, wouldBlock })!;
+      expect(md).toContain("**Would be blocked.** This job runs secure-registry in audit mode, so these downloads were allowed.");
+      expect(md).toContain("| `left-pad@1.3.1` | cooldown | published 14h ago, clears in 34h |");
+      expect(md).toContain("| `minimatch` | custom_block_list | 'minimatch' matches a configured block list pattern |");
+      expect(md.indexOf("**Held.**")).toBeLessThan(md.indexOf("**Would be blocked.**"));
+      expect(md.indexOf("`left-pad@1.3.1` | cooldown | published", md.indexOf("**Would be blocked.**"))).toBeLessThan(
+        md.indexOf("`minimatch`")
+      );
+    });
+
+    test("rendered when nothing else is", () => {
+      const md = renderSummary({ held: [], blocked: [], wouldBlock })!;
+      expect(md).toContain("**Would be blocked.**");
+      expect(md).not.toContain("**Blocked.**");
+      expect(md).not.toContain("**Held.**");
+    });
+
+    test("not offered as exemptions", () => {
+      const md = renderSummary({ held: [], blocked: [], wouldBlock })!;
+      expect(md).not.toContain("```yaml");
+    });
+  });
+
+  describe("long lists", () => {
+    const INSIGHTS = "https://app.example/github/o/r/actions/runs/1?tab=packages";
+    const blocked = Array.from({ length: 12 }, (_, i) => ({
+      ecosystem: "javascript",
+      package: `p${String(i).padStart(2, "0")}`,
+      version: "1.0.0",
+      controls: [{ name: "cooldown" }],
+    }));
+    const versions = Array.from({ length: 8 }, (_, i) => `1.0.${i}`);
+    const held = [
+      { ecosystem: "javascript", package: "many", versions, controls: [{ name: "block_list", reason: "a|b" }] },
+      ...Array.from({ length: 6 }, (_, i) => ({ ecosystem: "javascript", package: `h${i}`, versions: ["2.0.0"], controls: [{ name: "cooldown" }] })),
+    ];
+
+    test("each table shows 5 rows and links to run insights", () => {
+      const md = renderSummary({ held, blocked }, { insightsUrl: INSIGHTS })!;
+      expect(md).toContain("`p04@1.0.0`");
+      expect(md).not.toContain("`p05@1.0.0`");
+      expect(md).toContain(`Showing 5 of 12. [See all packages for this job in run insights](${INSIGHTS}).`);
+      expect(md).toContain(`Showing 5 of 7. [See all packages for this job in run insights](${INSIGHTS}).`);
+      expect(md).not.toContain("and 7 more |");
+    });
+
+    test("the exemption snippet still lists every version", () => {
+      const md = renderSummary({ held, blocked })!;
+      for (let i = 0; i < 12; i++) expect(md).toContain(`- "p${String(i).padStart(2, "0")}@1.0.0"`);
+      for (let i = 0; i < 6; i++) expect(md).toContain(`- "h${i}@2.0.0"`);
+    });
+
+    test("no link without an insights URL", () => {
+      const md = renderSummary({ held: [], blocked }, { binding: "none" })!;
+      expect(md).toContain("Showing 5 of 12.\n");
+      expect(md).not.toContain("See all packages");
+    });
+
+    test("no showing line when nothing is cut", () => {
+      const md = renderSummary({ held: [], blocked: blocked.slice(0, 5) }, { insightsUrl: INSIGHTS })!;
+      expect(md).not.toContain("Showing");
+    });
+
+    test("hidden versions per package are still cut at 5, and cells are escaped", () => {
+      const md = renderSummary({ held: held.slice(0, 1), blocked: [] })!;
+      expect(md).toContain("`1.0.7`, `1.0.6`, `1.0.5`, `1.0.4`, `1.0.3` and 3 more");
+      expect(md).toContain("a\\|b");
+    });
+  });
+});
+
+describe("insightsPackagesUrl", () => {
+  const env = { GITHUB_REPOSITORY: "octo/repo", GITHUB_RUN_ID: "42" };
+  const CORRELATION = "e7e37f5c-910f-4b17-963b-5c03dbd397ff";
+
+  test("bound session", () => {
+    for (const binding of ["oidc", "hr_key"]) {
+      expect(insightsPackagesUrl(env, { token: TOKEN, binding, correlationId: CORRELATION }, "130298415397")).toBe(
+        `${STEPSECURITY_WEB_URL}/github/octo/repo/actions/runs/42?tab=packages&correlationId=${CORRELATION}&utm_source=markdown&jobId=130298415397`
+      );
+    }
+  });
+
+  test("nothing when the job's rows are not in insights or the page cannot be addressed", () => {
+    const state = { token: TOKEN, binding: "oidc", correlationId: CORRELATION };
+    expect(insightsPackagesUrl(env, { ...state, binding: "none" }, "1")).toBeUndefined();
+    expect(insightsPackagesUrl(env, { ...state, binding: undefined }, "1")).toBeUndefined();
+    expect(insightsPackagesUrl(env, { ...state, correlationId: undefined }, "1")).toBeUndefined();
+    expect(insightsPackagesUrl(env, state, "")).toBeUndefined();
+    expect(insightsPackagesUrl(env, state, "${{ job.check_run_id }}")).toBeUndefined();
+    expect(insightsPackagesUrl({ GITHUB_RUN_ID: "42" }, state, "1")).toBeUndefined();
+    expect(insightsPackagesUrl({ GITHUB_REPOSITORY: "octo/repo" }, state, "1")).toBeUndefined();
   });
 });
 
@@ -403,21 +554,21 @@ describe("fetchSummary", () => {
 
   test("returns a non-empty first answer without retrying", async () => {
     mockFetchSequence([jsonResponse(200, { ...SUMMARY, may_be_incomplete: true })]);
-    expect(await fetchSummary(TOKEN, noSleep)).toEqual(SUMMARY);
+    expect(await fetchSummary(TOKEN, noSleep)).toEqual({ ...SUMMARY, wouldBlock: [] });
     expect(fetchCalls).toEqual([{ url: SUMMARY_URL, method: "GET", auth: `Bearer ${TOKEN}` }]);
     expect(noSleep).not.toHaveBeenCalled();
   });
 
   test("asks once more when the first answer is empty", async () => {
     mockFetchSequence([jsonResponse(200, EMPTY), jsonResponse(200, SUMMARY)]);
-    expect(await fetchSummary(TOKEN, noSleep)).toEqual(SUMMARY);
+    expect(await fetchSummary(TOKEN, noSleep)).toEqual({ ...SUMMARY, wouldBlock: [] });
     expect(fetchCalls).toHaveLength(2);
     expect(noSleep).toHaveBeenCalledTimes(1);
   });
 
   test("keeps the empty answer if the retry fails", async () => {
     mockFetchSequence([jsonResponse(200, EMPTY), jsonResponse(500, { code: "internal_error" })]);
-    expect(await fetchSummary(TOKEN, noSleep)).toEqual({ held: [], blocked: [] });
+    expect(await fetchSummary(TOKEN, noSleep)).toEqual({ held: [], blocked: [], wouldBlock: [] });
   });
 
   test("an error status gives no summary", async () => {
@@ -487,6 +638,36 @@ describe("finishSecureRegistry", () => {
     expect(mockedCore.notice).not.toHaveBeenCalled();
     expect(mockedCore.warning).not.toHaveBeenCalled();
     expect(logged()).not.toContain(TOKEN);
+  });
+
+  test("cooldown window, would-block rows and the insights link from state, input and API", async () => {
+    const CORRELATION = "e7e37f5c-910f-4b17-963b-5c03dbd397ff";
+    process.env.STATE_srCooldownDays = "2";
+    process.env.STATE_srBinding = "oidc";
+    process.env.STATE_correlation_id = CORRELATION;
+    process.env["INPUT_CHECK-RUN-ID"] = "130298415397";
+    process.env.GITHUB_REPOSITORY = "octo/repo";
+    process.env.GITHUB_RUN_ID = "42";
+    const blocked = Array.from({ length: 6 }, (_, i) => ({
+      ecosystem: "javascript",
+      package: `p${i}`,
+      version: "1.0.0",
+      controls: [{ name: "cooldown", reason: COOLDOWN_REASON }],
+    }));
+    const wouldBlock = [{ ecosystem: "javascript", package: "minimatch", version: "10.2.6", controls: [{ name: "custom_block_list" }] }];
+    mockFetchSequence([
+      jsonResponse(200, { held: SUMMARY.held, blocked, would_block: wouldBlock, may_be_incomplete: true }),
+      noContent(),
+    ]);
+    await finishSecureRegistry();
+
+    const written = fs.readFileSync(summaryFile, "utf8");
+    expect(written).toContain("The cooldown for this job is 2 days.");
+    expect(written).toContain("`minimatch@10.2.6`");
+    expect(written).toContain(
+      `Showing 5 of 6. [See all packages for this job in run insights](${STEPSECURITY_WEB_URL}/github/octo/repo/actions/runs/42?tab=packages&correlationId=${CORRELATION}&utm_source=markdown&jobId=130298415397).`
+    );
+    expect(logged()).toContain("1 package(s) held, 6 version(s) blocked, 1 would be blocked in enforce mode, see the job summary");
   });
 
   test("only revokes when npm was not configured", async () => {
