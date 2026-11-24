@@ -1,4 +1,4 @@
-import { PolicyResponse, Configuration } from "./interfaces";
+import { PolicyResponse, PolicyStoreResult, Configuration } from "./interfaces";
 import { STEPSECURITY_API_URL } from "./configs";
 
 class HttpStatusError extends Error {
@@ -56,7 +56,7 @@ export async function fetchPolicyFromStore(
   workflow: string,
   runId: string,
   correlationId: string
-): Promise<PolicyResponse | null> {
+): Promise<PolicyStoreResult> {
   if (apiKey === "") {
     throw new Error("[PolicyStoreFetch]: api-key is empty");
   }
@@ -79,7 +79,7 @@ export async function fetchPolicyFromStore(
     } catch (e) {
       // 404 means policy not found — don't retry, return null
       if (e instanceof HttpStatusError && e.statusCode === 404) {
-        return null;
+        return { policy: null, secureRegistry: false, policyName: "" };
       }
       err = e;
       if (retry < 2) await sleep(1000);
@@ -94,11 +94,21 @@ export async function fetchPolicyFromStore(
     throw error;
   }
 
+  const secureRegistry = secureRegistryEnabled(result);
+  const policyName = result?.policy_name || "";
+  // No policy matched (the API answers 200 with empty fields), or the policy
+  // sets no egress rules. Unchanged by secure-registry, so the egress
+  // fallback stays the same.
   if (!result || (!result.egress_policy && (!result.allowed_endpoints || result.allowed_endpoints.length === 0))) {
-    return null;
+    return { policy: null, secureRegistry, policyName };
   }
 
-  return result;
+  return { policy: result, secureRegistry, policyName };
+}
+
+// Whether a policy response says the policy enables secure-registry.
+export function secureRegistryEnabled(policy: PolicyResponse | null | undefined): boolean {
+  return policy?.secure_registry?.enabled === true;
 }
 
 async function getJsonWithTimeout<T>(

@@ -171,7 +171,7 @@ test("success: fetches policy from store", async () => {
   mockFetch(async () => jsonResponse(200, response));
 
   const result = await fetchPolicyFromStore(owner, repo, "my-api-key", workflow, runId, correlationId);
-  expect(result).toEqual(response);
+  expect(result).toEqual({ policy: response, secureRegistry: false, policyName: "" });
 });
 
 test("fetchPolicyFromStore throws when apiKey is empty", async () => {
@@ -180,18 +180,61 @@ test("fetchPolicyFromStore throws when apiKey is empty", async () => {
   ).rejects.toThrow("[PolicyStoreFetch]: api-key is empty");
 });
 
-test("fetchPolicyFromStore returns null when policy not found (404)", async () => {
+test("fetchPolicyFromStore returns no policy when policy not found (404)", async () => {
   mockFetch(async () => jsonResponse(404, { message: "not found" }));
 
   const result = await fetchPolicyFromStore("test-owner", "test-repo", "my-api-key", "ci.yml", "12345", "abc-def");
-  expect(result).toBeNull();
+  expect(result).toEqual({ policy: null, secureRegistry: false, policyName: "" });
 });
 
-test("fetchPolicyFromStore returns null when API returns empty policy", async () => {
+test("fetchPolicyFromStore returns no policy when API returns empty policy", async () => {
   mockFetch(async () => jsonResponse(200, { allowed_endpoints: [], egress_policy: "", policy_name: "" }));
 
   const result = await fetchPolicyFromStore("test-owner", "nonexistent-repo", "my-api-key", "ci.yml", "12345", "abc-def");
-  expect(result).toBeNull();
+  expect(result).toEqual({ policy: null, secureRegistry: false, policyName: "" });
+});
+
+test("a policy that only enables secure-registry has no egress rules but turns secure-registry on", async () => {
+  mockFetch(async () =>
+    jsonResponse(200, {
+      allowed_endpoints: [],
+      denied_endpoints: [],
+      egress_policy: "",
+      policy_name: "sr-only",
+      lockdown: null,
+      secure_registry: { enabled: true },
+    })
+  );
+
+  const result = await fetchPolicyFromStore("test-owner", "test-repo", "my-api-key", "ci.yml", "12345", "abc-def");
+  expect(result).toEqual({ policy: null, secureRegistry: true, policyName: "sr-only" });
+});
+
+test("a policy with egress rules and secure-registry returns both", async () => {
+  const response = {
+    allowed_endpoints: ["github.com:443"],
+    egress_policy: "block",
+    policy_name: "org-block",
+    secure_registry: { enabled: true },
+  };
+  mockFetch(async () => jsonResponse(200, response));
+
+  const result = await fetchPolicyFromStore("test-owner", "test-repo", "my-api-key", "ci.yml", "12345", "abc-def");
+  expect(result).toEqual({ policy: response, secureRegistry: true, policyName: "org-block" });
+});
+
+test.each([
+  [{ enabled: false }],
+  [{}],
+  [undefined],
+])("secure_registry %j does not turn secure-registry on", async (block) => {
+  mockFetch(async () =>
+    jsonResponse(200, { allowed_endpoints: ["github.com:443"], egress_policy: "block", secure_registry: block })
+  );
+
+  const result = await fetchPolicyFromStore("test-owner", "test-repo", "my-api-key", "ci.yml", "12345", "abc-def");
+  expect(result.secureRegistry).toBe(false);
+  expect(result.policy).not.toBeNull();
 });
 
 test("fetchPolicyFromStore retries on failure and succeeds", async () => {
@@ -206,7 +249,7 @@ test("fetchPolicyFromStore retries on failure and succeeds", async () => {
   ]);
 
   const result = await fetchPolicyFromStore("test-owner", "test-repo", "my-api-key", "ci.yml", "12345", "abc-def");
-  expect(result).toEqual(response);
+  expect(result.policy).toEqual(response);
 });
 
 test("fetchPolicyFromStore throws after all retries exhausted", async () => {
@@ -248,7 +291,7 @@ test("fetchPolicyFromStore sends correct authorization header", async () => {
   });
 
   const result = await fetchPolicyFromStore("test-owner", "test-repo", apiKey, "ci.yml", "12345", "abc-def");
-  expect(result).toEqual({ allowed_endpoints: [], egress_policy: "audit" });
+  expect(result.policy).toEqual({ allowed_endpoints: [], egress_policy: "audit" });
 });
 
 test("fetchPolicyFromStore returns within ~3s when server is slow (regression test for AggregateError)", async () => {

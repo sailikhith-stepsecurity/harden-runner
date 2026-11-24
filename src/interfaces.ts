@@ -35,4 +35,17 @@ export interface PolicyResponse {
   disable_telemetry?: boolean;
   egress_policy?: string;
   policy_name?: string;
+  // Only whether the policy enables secure-registry; its settings stay
+  // server side and reach the job through the session API.
+  secure_registry?: { enabled?: boolean };
+}
+
+// What the policy store returned for this job. policy is null when no policy
+// with egress rules applies, exactly as before secure-registry existed, so
+// the egress fallback does not change. secureRegistry is read on its own: a
+// policy can enable secure-registry and set no egress rules.
+export interface PolicyStoreResult {
+  policy: PolicyResponse | null;
+  secureRegistry: boolean;
+  policyName: string;
 }

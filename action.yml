@@ -37,7 +37,7 @@ inputs:
     required: false
     default: ""
   api-key:
-    description: "StepSecurity API key for authenticating with the policy store. Required when use-policy-store is set to true."
+    description: "StepSecurity API key for authenticating with the policy store. Required when use-policy-store is set to true. Also used by secure-registry to identify the job when no OIDC token is available."
     required: false
     default: ""
   use-policy-store:
@@ -57,7 +57,7 @@ inputs:
     required: false
     default: ""
   secure-registry:
-    description: "Route npm installs in this job through StepSecurity secure-registry. Set to true for the default settings, or to a YAML block: `ecosystems` (all, the default, or a list such as [npm]) picks which ecosystems are routed, `ecosystem-defaults` holds settings shared by every ecosystem, and a block per ecosystem (for example `npm:`) overrides them. id-token: write permission is recommended so GitHub verifies the job's identity. Leave empty or set to false to disable."
+    description: "Route npm installs in this job through StepSecurity secure-registry. Set to true for the default settings, or to a YAML block: `ecosystems` (all, the default, or a list such as [npm]) picks which ecosystems are routed, `ecosystem-defaults` holds settings shared by every ecosystem, and a block per ecosystem (for example `npm:`) overrides them. id-token: write permission is recommended so GitHub verifies the job's identity. Leave empty or set to false to disable, unless the job's Harden-Runner policy (policy or use-policy-store) enables secure-registry: the policy then turns it on without this input."
     required: false
     default: ""
   check-run-id:

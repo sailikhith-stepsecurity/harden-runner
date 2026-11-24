@@ -30,10 +30,13 @@ interface SessionNotice {
 interface SessionResponse {
   token?: string;
   expires_at?: number;
-  // How the session is tied to this job: oidc, hr_key or none. Set whenever a
-  // token is minted.
+  // How the session is tied to this job: oidc, hr_key, api_key or none. Set
+  // whenever a token is minted.
   binding?: string;
   edition?: string;
+  // The Harden-Runner policy whose secure-registry settings were applied.
+  // Empty when no policy with secure-registry enabled is attached.
+  policy_name?: string;
   registries?: Record<string, string>;
   config?: Record<string, { mode?: string; lockfile_resolved?: string }>;
   notices?: SessionNotice[];
@@ -56,12 +59,24 @@ export interface JobBinding {
   oneTimeKey?: string;
 }
 
+export interface SecureRegistryOptions extends JobBinding {
+  // The job's Harden-Runner policy enables secure-registry, so a session is
+  // created even when the secure-registry input is not set.
+  policyEnabled?: boolean;
+  // The policy named by the `policy` input, when the policy came from there.
+  requestedPolicy?: string;
+  // The tenant's Harden-Runner API key. Used only when there is no OIDC
+  // token, and only with the job's correlation ID.
+  apiKey?: string;
+}
+
 // The job identity sent when no OIDC token is available.
 export type DeclaredClaims = Record<string, string>;
 
 export type SessionAuth =
   | { kind: "oidc"; idToken: string; refreshIDToken: () => Promise<string> }
-  | { kind: "declared"; claims: DeclaredClaims };
+  | { kind: "declared"; claims: DeclaredClaims }
+  | { kind: "api_key"; apiKey: string; claims: DeclaredClaims };
 
 interface SessionError {
   code?: string;
@@ -98,6 +113,19 @@ export function secureRegistryInput(raw: string): string | undefined {
     return undefined;
   }
   return value;
+}
+
+// The config to send to the session API, or undefined when no session is
+// wanted. A session is created when the input turns secure-registry on, or
+// when the job's Harden-Runner policy enables it. Without a usable input the
+// config is empty and the policy decides, so `false` cannot turn off a
+// policy.
+export function sessionConfig(raw: string, policyEnabled: boolean): string | undefined {
+  const input = secureRegistryInput(raw);
+  if (input !== undefined) {
+    return input;
+  }
+  return policyEnabled ? "" : undefined;
 }
 
 interface EventPayload {
@@ -304,10 +332,14 @@ function errorCode(body: unknown): string | undefined {
   return (body as SessionError | undefined)?.code;
 }
 
-async function postSession(request: Record<string, unknown>): Promise<SessionHttpResult> {
+async function postSession(request: Record<string, unknown>, apiKey?: string): Promise<SessionHttpResult> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (apiKey) {
+    headers.authorization = `vm-api-key ${apiKey}`;
+  }
   const resp = await fetch(`${STEPSECURITY_API_URL}/secure-registry/sessions`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(request),
     signal: AbortSignal.timeout(SESSION_TIMEOUT_MS),
   });
@@ -325,7 +357,8 @@ async function postSession(request: Record<string, unknown>): Promise<SessionHtt
 }
 
 // The request body. The correlation ID is sent only when it is a UUID, and
-// the key only next to it.
+// the one-time key only next to it. With the API key, the key travels in the
+// Authorization header, never in the body.
 function sessionBody(config: string, auth: SessionAuth, job: JobBinding): Record<string, unknown> {
   const body: Record<string, unknown> = { config };
   const correlationId = job.correlationId && UUID.test(job.correlationId) ? job.correlationId : undefined;
@@ -350,7 +383,8 @@ export async function createSession(
   auth: SessionAuth,
   job: JobBinding = {}
 ): Promise<SessionHttpResult> {
-  let result = await postSession(sessionBody(config, auth, job));
+  const apiKey = auth.kind === "api_key" ? auth.apiKey : undefined;
+  let result = await postSession(sessionBody(config, auth, job), apiKey);
   if (auth.kind === "oidc" && result.status === 401 && errorCode(result.body) === "oidc_expired") {
     core.info("secure-registry: OIDC token expired before the session was created, retrying with a new token");
     const retry: SessionAuth = { ...auth, idToken: await auth.refreshIDToken() };
@@ -376,7 +410,14 @@ export function describeSessionFailure(
       return { level: "notice", message: `this run is not eligible (${err.reason || "no reason given"})` };
     case "enterprise_not_supported":
       return { level: "notice", message: "not yet available for organizations with a StepSecurity subscription" };
+    case "api_key_invalid":
+      return {
+        level: "warning",
+        message: "the api-key does not belong to the StepSecurity tenant of this repository's owner",
+      };
     case "id_token_required":
+      // Older session APIs only; enterprise jobs without OIDC now use
+      // declared claims or the API key.
       return {
         level: "notice",
         message:
@@ -416,11 +457,24 @@ function saveState(name: string, value: string) {
   });
 }
 
+// Which settings the session applied: the attached policy's, or, without
+// one, the tenant's. Community sessions have neither.
+export function appliedPolicy(session: SessionResponse): string | undefined {
+  if (session.policy_name) {
+    return session.policy_name;
+  }
+  return session.edition === "enterprise" ? "none (tenant settings)" : undefined;
+}
+
 // Never logs the token: it is masked before this runs and is not part of
 // any field printed here.
 function printSession(session: SessionResponse) {
   core.startGroup("secure-registry session");
   core.info(`edition: ${session.edition}`);
+  const policy = appliedPolicy(session);
+  if (policy) {
+    core.info(`policy: ${policy}`);
+  }
   if (session.binding) {
     core.info(`binding: ${session.binding}`);
   }
@@ -439,8 +493,12 @@ function printSession(session: SessionResponse) {
 }
 
 // Uses the job's OIDC token when there is one. Without it (no id-token: write,
-// or a fork pull_request run), sends the job identity as declared claims.
-async function sessionAuth(): Promise<{ ok: true; auth: SessionAuth } | { ok: false; reason: string }> {
+// or a fork pull_request run), sends the job identity as declared claims,
+// proven by the tenant's API key when the job has one and a correlation ID
+// to tie the session to, and otherwise bound by the one-time key.
+async function sessionAuth(
+  job: SecureRegistryOptions
+): Promise<{ ok: true; auth: SessionAuth } | { ok: false; reason: string }> {
   const getIDToken = () => core.getIDToken(SECURE_REGISTRY_AUDIENCE);
   let reason: string;
   if (process.env.ACTIONS_ID_TOKEN_REQUEST_URL) {
@@ -464,13 +522,19 @@ async function sessionAuth(): Promise<{ ok: true; auth: SessionAuth } | { ok: fa
       reason: `${reason}, and the job identity is incomplete (${declared.reason})`,
     };
   }
+  // The server ties an API-key session to the job only through the
+  // correlation ID, so the key is used only when there is one.
+  if (job.apiKey && job.correlationId && UUID.test(job.correlationId)) {
+    core.debug(`secure-registry: ${reason}, using the api-key`);
+    return { ok: true, auth: { kind: "api_key", apiKey: job.apiKey, claims: declared.claims } };
+  }
   core.debug(
     `secure-registry: ${reason}, using declared claims; add "permissions: id-token: write" for verified attribution`
   );
   return { ok: true, auth: { kind: "declared", claims: declared.claims } };
 }
 
-async function configureNpm(config: string, job: JobBinding): Promise<SecureRegistryResult> {
+async function configureNpm(config: string, job: SecureRegistryOptions): Promise<SecureRegistryResult> {
   if (isGHES()) {
     skipNotice("not supported on GitHub Enterprise Server yet");
     return {};
@@ -488,7 +552,7 @@ async function configureNpm(config: string, job: JobBinding): Promise<SecureRegi
     return {};
   }
 
-  const auth = await sessionAuth();
+  const auth = await sessionAuth(job);
   if (auth.ok === false) {
     skipNotice(auth.reason);
     return {};
@@ -510,6 +574,16 @@ async function configureNpm(config: string, job: JobBinding): Promise<SecureRegi
     core.setSecret(session.token);
   }
   printSession(session);
+  if (job.requestedPolicy && session.edition === "enterprise" && session.policy_name !== job.requestedPolicy) {
+    // The session API applies the policy attached to this workflow, which
+    // the `policy` input does not choose.
+    const source = session.policy_name
+      ? `the policy "${session.policy_name}" attached to this workflow`
+      : "the tenant settings, as no policy with secure-registry enabled is attached to this workflow";
+    core.notice(
+      `secure-registry: settings come from ${source}, not from the policy "${job.requestedPolicy}" named in the policy input`
+    );
+  }
 
   if (!session.token) {
     if (result.status === 201) {
@@ -524,8 +598,12 @@ async function configureNpm(config: string, job: JobBinding): Promise<SecureRegi
   saveState("srToken", session.token);
 
   if (session.binding === "none") {
+    const fix =
+      session.edition === "enterprise"
+        ? 'Add "permissions: id-token: write" or the Harden-Runner api-key to this job to link it.'
+        : 'Add "permissions: id-token: write" to this job to link it.';
     core.notice(
-      'secure-registry: this job is not linked to run insights, so the packages it installs will not appear there. Add "permissions: id-token: write" to this job to link it.'
+      `secure-registry: this job is not linked to run insights, so the packages it installs will not appear there. ${fix}`
     );
   }
 
@@ -588,12 +666,17 @@ async function configureNpm(config: string, job: JobBinding): Promise<SecureRegi
 
 // Points npm at secure-registry for the rest of the job. Fails open: any
 // problem leaves npm on its default registry and never fails the job.
-// job carries the correlation ID and one-time key when /monitor has run;
-// the key is sent to the session API only and never logged or saved.
-export async function setupSecureRegistry(job: JobBinding = {}): Promise<SecureRegistryResult> {
-  const config = secureRegistryInput(core.getInput("secure-registry"));
+// job carries the correlation ID and one-time key when /monitor has run, and
+// what the policy store said; the keys are sent to the session API only and
+// never logged or saved.
+export async function setupSecureRegistry(job: SecureRegistryOptions = {}): Promise<SecureRegistryResult> {
+  const input = core.getInput("secure-registry");
+  const config = sessionConfig(input, job.policyEnabled === true);
   if (config === undefined) {
     return {};
+  }
+  if (secureRegistryInput(input) === undefined) {
+    core.info("secure-registry: enabled by the Harden-Runner policy");
   }
 
   try {

@@ -9,6 +9,7 @@ import {
   describeSessionFailure,
   missingTokenReason,
   secureRegistryInput,
+  sessionConfig,
   sessionWaitsForMonitor,
   setupSecureRegistry,
 } from "./secure-registry";
@@ -45,6 +46,7 @@ const REGISTRY = "https://community.registry.stepsecurity.io/javascript/";
 const SESSION_URL = `${STEPSECURITY_API_URL}/secure-registry/sessions`;
 const CORRELATION_ID = "0f8b3c2e-5d4a-4e1b-9c7f-2a6d8e0b1c3d";
 const ONE_TIME_KEY = "7d2e9a41-c3b5-4f86-a0d1-e5b9c8f7a6d2";
+const API_KEY = "hr-api-key-5f3a9c1e7b2d";
 
 // The runner environment of a public repo on a GitHub-hosted runner.
 const JOB_ENV: Record<string, string> = {
@@ -98,6 +100,7 @@ let home: string;
 let runnerTemp: string;
 let stateFile: string;
 let fetchCalls: Array<{ url: string; body: Record<string, unknown> }>;
+let fetchHeaders: Array<Record<string, string>>;
 
 function jsonResponse(
   status: number,
@@ -128,6 +131,7 @@ function mockFetchSequence(entries: Array<Response | Error>) {
   let i = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     fetchCalls.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+    fetchHeaders.push({ ...(init?.headers as Record<string, string>) });
     const entry = entries[i++];
     if (!entry) throw new Error("fetch called more times than expected");
     if (entry instanceof Error) throw entry;
@@ -192,6 +196,7 @@ beforeEach(() => {
 
   mockedCore.getIDToken.mockResolvedValue("oidc-jwt");
   fetchCalls = [];
+  fetchHeaders = [];
 });
 
 afterEach(() => {
@@ -210,6 +215,21 @@ describe("secureRegistryInput", () => {
     ["npm:\n  mode: audit", "npm:\n  mode: audit"],
   ])("%j -> %j", (raw, expected) => {
     expect(secureRegistryInput(raw)).toBe(expected);
+  });
+});
+
+describe("sessionConfig", () => {
+  test.each([
+    // input, policy enables secure-registry, config sent (undefined: no session)
+    ["true", false, "true"],
+    ["true", true, "true"],
+    ["npm:\n  mode: audit", true, "npm:\n  mode: audit"],
+    ["", true, ""],
+    ["false", true, ""],
+    ["", false, undefined],
+    ["false", false, undefined],
+  ])("input %j, policy %j -> %j", (raw, policyEnabled, expected) => {
+    expect(sessionConfig(raw, policyEnabled)).toBe(expected);
   });
 });
 
@@ -242,6 +262,7 @@ describe("describeSessionFailure", () => {
     [403, { code: "not_eligible", reason: "runner" }, "notice", "GitHub-hosted runners only"],
     [403, { code: "enterprise_not_supported" }, "notice", "StepSecurity subscription"],
     [403, { code: "id_token_required" }, "notice", 'add "permissions: id-token: write" to this job'],
+    [403, { code: "api_key_invalid", error: "x" }, "warning", "the api-key does not belong to the StepSecurity tenant"],
     [400, { code: "bad_request", error: "claims.check_run_id is required" }, "warning", "HTTP 400 (bad_request: claims.check_run_id is required)"],
     [401, { code: "oidc_replayed" }, "warning", "rejected the OIDC token (oidc_replayed)"],
     [401, { code: "oidc_invalid" }, "warning", "rejected the OIDC token (oidc_invalid)"],
@@ -535,6 +556,175 @@ describe("setupSecureRegistry", () => {
     await setupSecureRegistry({ correlationId: CORRELATION_ID, oneTimeKey: ONE_TIME_KEY });
 
     expect(fetchCalls[0].body).toEqual({ oidc_token: "oidc-jwt", correlation_id: CORRELATION_ID, config: "true" });
+  });
+
+  describe("Harden-Runner policy", () => {
+    test("a policy that enables secure-registry creates a session without the input", async () => {
+      process.env["INPUT_SECURE-REGISTRY"] = "";
+      mockFetchSequence([created({ edition: "enterprise", policy_name: "org-sr" })]);
+
+      expect(await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true })).toEqual({
+        registryEndpoint: "community.registry.stepsecurity.io:443",
+      });
+      expect(fetchCalls[0].body).toEqual({ oidc_token: "oidc-jwt", correlation_id: CORRELATION_ID, config: "" });
+      expect(mockedCore.info).toHaveBeenCalledWith("secure-registry: enabled by the Harden-Runner policy");
+    });
+
+    test("input false does not turn off a policy that enables secure-registry", async () => {
+      process.env["INPUT_SECURE-REGISTRY"] = "false";
+      mockFetchSequence([created({ edition: "enterprise", policy_name: "org-sr" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true });
+
+      expect(fetchCalls[0].body.config).toBe("");
+    });
+
+    test("the input is sent as is when the policy also enables secure-registry", async () => {
+      process.env["INPUT_SECURE-REGISTRY"] = "npm:\n  mode: audit";
+      mockFetchSequence([created({ edition: "enterprise", policy_name: "org-sr" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true });
+
+      expect(fetchCalls[0].body.config).toBe("npm:\n  mode: audit");
+      expect(mockedCore.info).not.toHaveBeenCalledWith("secure-registry: enabled by the Harden-Runner policy");
+    });
+
+    test.each(["", "false"])("input %j without a policy creates no session", async (input) => {
+      process.env["INPUT_SECURE-REGISTRY"] = input;
+      mockFetchSequence([]);
+
+      expect(await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: false, apiKey: API_KEY })).toEqual({});
+      expect(fetchCalls).toHaveLength(0);
+    });
+
+    test("prints the policy whose settings were applied", async () => {
+      mockFetchSequence([created({ edition: "enterprise", policy_name: "org-sr" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true });
+
+      expect(mockedCore.info).toHaveBeenCalledWith("policy: org-sr");
+    });
+
+    test("an enterprise session without a policy prints the tenant settings", async () => {
+      mockFetchSequence([created({ edition: "enterprise" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID });
+
+      expect(mockedCore.info).toHaveBeenCalledWith("policy: none (tenant settings)");
+    });
+
+    test("a community session prints no policy", async () => {
+      mockFetchSequence([created()]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID });
+
+      expect(logged()).not.toContain("policy:");
+    });
+
+    test("the policy input naming the applied policy gets no notice", async () => {
+      mockFetchSequence([created({ edition: "enterprise", policy_name: "org-sr" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true, requestedPolicy: "org-sr" });
+
+      expect(mockedCore.notice).not.toHaveBeenCalled();
+    });
+
+    test("a notice says when the applied policy is not the one the policy input named", async () => {
+      mockFetchSequence([created({ edition: "enterprise", policy_name: "org-sr" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true, requestedPolicy: "team-sr" });
+
+      expect(mockedCore.notice).toHaveBeenCalledWith(
+        'secure-registry: settings come from the policy "org-sr" attached to this workflow, not from the policy "team-sr" named in the policy input'
+      );
+    });
+
+    test("a notice says when tenant settings apply instead of the policy the policy input named", async () => {
+      mockFetchSequence([created({ edition: "enterprise" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true, requestedPolicy: "team-sr" });
+
+      expect(mockedCore.notice).toHaveBeenCalledWith(
+        'secure-registry: settings come from the tenant settings, as no policy with secure-registry enabled is attached to this workflow, not from the policy "team-sr" named in the policy input'
+      );
+    });
+
+    test("with an OIDC token the api-key is not sent", async () => {
+      mockFetchSequence([created({ edition: "enterprise" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID, oneTimeKey: ONE_TIME_KEY, apiKey: API_KEY });
+
+      expect(fetchCalls[0].body).toEqual({ oidc_token: "oidc-jwt", correlation_id: CORRELATION_ID, config: "true" });
+      expect(fetchHeaders[0].authorization).toBeUndefined();
+    });
+  });
+
+  describe("no OIDC token: api-key", () => {
+    beforeEach(() => {
+      delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+      process.env["INPUT_SECURE-REGISTRY"] = "";
+    });
+
+    const job = { correlationId: CORRELATION_ID, oneTimeKey: ONE_TIME_KEY, policyEnabled: true, apiKey: API_KEY };
+
+    test("sends the key in the Authorization header with the declared claims", async () => {
+      mockFetchSequence([created({ edition: "enterprise", binding: "api_key", policy_name: "org-sr" })]);
+
+      expect(await setupSecureRegistry(job)).toEqual({ registryEndpoint: "community.registry.stepsecurity.io:443" });
+      expect(fetchCalls[0].body).toEqual({
+        claims: DECLARED_CLAIMS,
+        correlation_id: CORRELATION_ID,
+        one_time_key: ONE_TIME_KEY,
+        config: "",
+      });
+      expect(fetchHeaders[0].authorization).toBe(`vm-api-key ${API_KEY}`);
+      expect(mockedCore.info).toHaveBeenCalledWith("binding: api_key");
+      expect(mockedCore.notice).not.toHaveBeenCalled();
+      expect(mockedCore.warning).not.toHaveBeenCalled();
+    });
+
+    test("never logs or saves the api-key", async () => {
+      mockFetchSequence([created({ edition: "enterprise", binding: "api_key" })]);
+
+      await setupSecureRegistry(job);
+
+      expect(logged()).not.toContain(API_KEY);
+      expect(JSON.stringify(fetchCalls)).not.toContain(API_KEY);
+      expect(fs.readFileSync(stateFile, "utf8")).not.toContain(API_KEY);
+      expect(fs.readFileSync(npmrcPath(), "utf8")).not.toContain(API_KEY);
+    });
+
+    test("without a UUID correlation ID uses declared claims without the key", async () => {
+      process.env["INPUT_SECURE-REGISTRY"] = "true";
+      mockFetchSequence([created({ binding: "none" })]);
+
+      await setupSecureRegistry({ ...job, correlationId: "runner-name-1" });
+
+      expect(fetchCalls[0].body).toEqual({ claims: DECLARED_CLAIMS, config: "true" });
+      expect(fetchHeaders[0].authorization).toBeUndefined();
+    });
+
+    test("an invalid key leaves npm on the default registry without a retry", async () => {
+      mockFetchSequence([jsonResponse(403, { code: "api_key_invalid", error: "x" })]);
+
+      expect(await setupSecureRegistry(job)).toEqual({});
+      expect(fetchCalls).toHaveLength(1);
+      expect(mockedCore.warning).toHaveBeenCalledWith(
+        "secure-registry: the api-key does not belong to the StepSecurity tenant of this repository's owner. npm stays on the default registry."
+      );
+      expect(readState()).toEqual({});
+      expect(fs.existsSync(npmrcPath())).toBe(false);
+    });
+
+    test("an unbound enterprise session suggests the api-key", async () => {
+      mockFetchSequence([created({ edition: "enterprise", binding: "none" })]);
+
+      await setupSecureRegistry({ correlationId: CORRELATION_ID, oneTimeKey: ONE_TIME_KEY, policyEnabled: true });
+
+      expect(mockedCore.notice).toHaveBeenCalledWith(
+        'secure-registry: this job is not linked to run insights, so the packages it installs will not appear there. Add "permissions: id-token: write" or the Harden-Runner api-key to this job to link it.'
+      );
+    });
   });
 
   describe("no OIDC token: declared claims", () => {

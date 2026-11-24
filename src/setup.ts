@@ -14,7 +14,13 @@ import {
   isValidEvent,
 } from "./cache";
 import { Configuration, PolicyResponse } from "./interfaces";
-import { fetchPolicy, fetchPolicyFromStore, includeGHESServerEndpoint, mergeConfigs } from "./policy-utils";
+import {
+  fetchPolicy,
+  fetchPolicyFromStore,
+  includeGHESServerEndpoint,
+  mergeConfigs,
+  secureRegistryEnabled,
+} from "./policy-utils";
 import * as cache from "@actions/cache";
 import { getCacheEntry } from "@actions/cache/lib/internal/cacheHttpClient";
 import * as cacheTwirpClient from "@actions/cache/lib/internal/shared/cacheTwirpClient";
@@ -198,6 +204,10 @@ async function resolveCacheHost(): Promise<string | undefined> {
     }
 
     let policyName = core.getInput("policy");
+    // Whether the job's Harden-Runner policy enables secure-registry, and the
+    // policy the `policy` input named, if that is where it came from.
+    let policySecureRegistry = false;
+    let requestedPolicy = "";
     if (confg.use_policy_store) {
       console.log(`Fetching policy from policy store`);
       if (confg.api_key === "") {
@@ -211,7 +221,7 @@ async function resolveCacheHost(): Promise<string | undefined> {
           const repoName = (process.env["GITHUB_REPOSITORY"] || "").split("/")[1] || "";
           const workflowRef = process.env["GITHUB_WORKFLOW_REF"] || "";
           const workflow = workflowRef.replace(/.*\.github\/workflows\//, "").replace(/@.*/, "");
-          let result: PolicyResponse | null = await fetchPolicyFromStore(
+          const stored = await fetchPolicyFromStore(
             policyOwner,
             repoName,
             confg.api_key,
@@ -219,9 +229,16 @@ async function resolveCacheHost(): Promise<string | undefined> {
             confg.run_id,
             confg.correlation_id
           );
+          policySecureRegistry = stored.secureRegistry;
+          const result: PolicyResponse | null = stored.policy;
           if (result !== null) {
             core.info(`Policy found: ${result.policy_name || "unnamed"}`);
             confg = mergeConfigs(confg, result);
+          } else if (stored.secureRegistry) {
+            core.info(
+              `Policy found: ${stored.policyName || "unnamed"}. It sets no egress rules. Defaulting to audit mode.`
+            );
+            confg.egress_policy = "audit";
           } else {
             core.info("No policy found in policy store. Defaulting to audit mode.");
             confg.egress_policy = "audit";
@@ -248,6 +265,8 @@ async function resolveCacheHost(): Promise<string | undefined> {
           idToken
         );
         confg = mergeConfigs(confg, result);
+        policySecureRegistry = secureRegistryEnabled(result);
+        requestedPolicy = policyName;
       } catch (err) {
         core.info(`[!] ${err}`);
         // Only fail the job if ID token is not available
@@ -518,11 +537,16 @@ async function resolveCacheHost(): Promise<string | undefined> {
 
     // After /monitor, so the session can carry the one-time key, and before
     // the agent config is built, so the registry host is in allowed-endpoints.
+    // Only this GitHub-hosted path follows the policy and uses the api-key;
+    // the paths that set up before /monitor follow the input only.
     if (secureRegistryAfterMonitor) {
       allowSecureRegistry(
         await setupSecureRegistry({
           correlationId: correlation_id,
           oneTimeKey: confg.one_time_key,
+          policyEnabled: policySecureRegistry,
+          requestedPolicy,
+          apiKey: confg.api_key,
         })
       );
     }
