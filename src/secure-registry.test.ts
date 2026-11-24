@@ -722,7 +722,7 @@ describe("setupSecureRegistry", () => {
       await setupSecureRegistry({ correlationId: CORRELATION_ID, oneTimeKey: ONE_TIME_KEY, policyEnabled: true });
 
       expect(mockedCore.notice).toHaveBeenCalledWith(
-        'secure-registry: this job is not linked to run insights, so the packages it installs will not appear there. Add "permissions: id-token: write" or the Harden-Runner api-key to this job to link it.'
+        'secure-registry: this job is not linked to run insights, so held and blocked packages are not listed. Add "permissions: id-token: write" to this job, or set "api-key" with "use-policy-store: true" on the Harden-Runner step.'
       );
     });
   });
@@ -773,7 +773,7 @@ describe("setupSecureRegistry", () => {
       });
       expect(mockedCore.notice).toHaveBeenCalledTimes(1);
       expect(mockedCore.notice.mock.calls[0][0]).toBe(
-        'secure-registry: this job is not linked to run insights, so the packages it installs will not appear there. Add "permissions: id-token: write" to this job to link it.'
+        'secure-registry: this job is not linked to run insights, so held and blocked packages are not listed. Add "permissions: id-token: write" to this job to link it.'
       );
       expect(fs.existsSync(npmrcPath())).toBe(true);
     });

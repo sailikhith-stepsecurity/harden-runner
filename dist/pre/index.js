@@ -86546,9 +86546,9 @@ function configureNpm(config, job) {
         saveState("srToken", session.token);
         if (session.binding === "none") {
             const fix = session.edition === "enterprise"
-                ? 'Add "permissions: id-token: write" or the Harden-Runner api-key to this job to link it.'
+                ? 'Add "permissions: id-token: write" to this job, or set "api-key" with "use-policy-store: true" on the Harden-Runner step.'
                 : 'Add "permissions: id-token: write" to this job to link it.';
-            lib_core.notice(`secure-registry: this job is not linked to run insights, so the packages it installs will not appear there. ${fix}`);
+            lib_core.notice(`secure-registry: this job is not linked to run insights, so held and blocked packages are not listed. ${fix}`);
         }
         for (const ecosystem of Object.keys((_b = session.registries) !== null && _b !== void 0 ? _b : {})) {
             if (ecosystem !== "npm") {
