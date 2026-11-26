@@ -86403,9 +86403,14 @@ function describeSessionFailure(result) {
         case "unavailable":
             return { level: "warning", message: "the session API is unavailable" };
         default:
+            // The server's error text can say why a claim or key was refused, so
+            // it goes to the debug log only.
+            if (err.error) {
+                lib_core.debug(`secure-registry: session API error: ${err.error}`);
+            }
             return {
                 level: "warning",
-                message: `session request failed with HTTP ${result.status}${err.code ? ` (${err.code}: ${err.error})` : ""}`,
+                message: `session request failed (HTTP ${result.status}${err.code ? `, ${err.code}` : ""})`,
             };
     }
 }
@@ -86428,25 +86433,25 @@ function appliedPolicy(session) {
     }
     return session.edition === "enterprise" ? "none (tenant settings)" : undefined;
 }
-// Never logs the token: it is masked before this runs and is not part of
-// any field printed here.
+// Job logs are readable by anyone who can read the repository, so the
+// session details are debug output only. The server's notices are written
+// for the workflow author and stay visible. Never logs the token: it is
+// masked before this runs and is not part of any field printed here.
 function printSession(session) {
     var _a, _b, _c;
-    lib_core.startGroup("secure-registry session");
-    lib_core.info(`edition: ${session.edition}`);
+    lib_core.debug(`secure-registry: edition: ${session.edition}`);
     const policy = appliedPolicy(session);
     if (policy) {
-        lib_core.info(`policy: ${policy}`);
+        lib_core.debug(`secure-registry: policy: ${policy}`);
     }
     if (session.binding) {
-        lib_core.info(`binding: ${session.binding}`);
+        lib_core.debug(`secure-registry: binding: ${session.binding}`);
     }
     if (session.expires_at) {
-        lib_core.info(`expires at: ${new Date(session.expires_at * 1000).toISOString()}`);
+        lib_core.debug(`secure-registry: expires at: ${new Date(session.expires_at * 1000).toISOString()}`);
     }
-    lib_core.info(`registries: ${JSON.stringify((_a = session.registries) !== null && _a !== void 0 ? _a : {})}`);
-    lib_core.info(`resolved config:\n${JSON.stringify((_b = session.config) !== null && _b !== void 0 ? _b : {}, null, 2)}`);
-    lib_core.endGroup();
+    lib_core.debug(`secure-registry: registries: ${JSON.stringify((_a = session.registries) !== null && _a !== void 0 ? _a : {})}`);
+    lib_core.debug(`secure-registry: resolved config: ${JSON.stringify((_b = session.config) !== null && _b !== void 0 ? _b : {})}`);
     for (const notice of (_c = session.notices) !== null && _c !== void 0 ? _c : []) {
         lib_core.notice(`secure-registry: ${notice.message}${notice.path ? ` (${notice.path})` : ""}`);
     }
@@ -86527,11 +86532,12 @@ function configureNpm(config, job) {
         printSession(session);
         if (job.requestedPolicy && session.edition === "enterprise" && session.policy_name !== job.requestedPolicy) {
             // The session API applies the policy attached to this workflow, which
-            // the `policy` input does not choose.
+            // the `policy` input does not choose. Policy names stay out of the
+            // visible log; the applied one is in the debug output above.
             const source = session.policy_name
-                ? `the policy "${session.policy_name}" attached to this workflow`
+                ? "the policy attached to this workflow"
                 : "the tenant settings, as no policy with secure-registry enabled is attached to this workflow";
-            lib_core.notice(`secure-registry: settings come from ${source}, not from the policy "${job.requestedPolicy}" named in the policy input`);
+            lib_core.notice(`secure-registry: settings come from ${source}, not from the policy named in the policy input`);
         }
         if (!session.token) {
             if (result.status === 201) {

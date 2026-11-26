@@ -287,20 +287,27 @@ describe("revokeToken", () => {
     mockFetchSequence([noContent()]);
     await revokeToken(TOKEN);
     expect(fetchCalls).toEqual([{ url: REVOKE_URL, method: "POST", auth: `Bearer ${TOKEN}` }]);
-    expect(logged()).toContain("run token revoked");
+    expect(mockedCore.debug).toHaveBeenCalledWith("secure-registry: run token revoked");
+    expect(mockedCore.info).not.toHaveBeenCalled();
   });
 
   test("error status is logged, not thrown", async () => {
     mockFetchSequence([jsonResponse(404, { code: "token_not_found" })]);
     await revokeToken(TOKEN);
-    expect(logged()).toContain("could not revoke the run token (HTTP 404, token_not_found)");
+    expect(mockedCore.debug.mock.calls.flat().join("\n")).toContain(
+      "could not revoke the run token (HTTP 404, token_not_found)"
+    );
+    expect(mockedCore.info).not.toHaveBeenCalled();
     expect(mockedCore.warning).not.toHaveBeenCalled();
   });
 
   test("network error is logged, not thrown", async () => {
     mockFetchSequence([new Error("connect ECONNREFUSED")]);
     await revokeToken(TOKEN);
-    expect(logged()).toContain("could not revoke the run token (connect ECONNREFUSED)");
+    expect(mockedCore.debug.mock.calls.flat().join("\n")).toContain(
+      "could not revoke the run token (connect ECONNREFUSED)"
+    );
+    expect(mockedCore.info).not.toHaveBeenCalled();
   });
 });
 

@@ -159,6 +159,12 @@ function logged(): string {
   return fns.flatMap((fn) => fn.mock.calls.map((args) => args.map(String).join(" "))).join("\n");
 }
 
+// What every reader of the job log sees: debug output is left out.
+function visible(): string {
+  const fns = [mockedCore.info, mockedCore.notice, mockedCore.warning, mockedCore.startGroup] as jest.Mock[];
+  return fns.flatMap((fn) => fn.mock.calls.map((args) => args.map(String).join(" "))).join("\n");
+}
+
 function npmrcPath() {
   return path.join(runnerTemp, ".npmrc");
 }
@@ -263,17 +269,23 @@ describe("describeSessionFailure", () => {
     [403, { code: "enterprise_not_supported" }, "notice", "StepSecurity subscription"],
     [403, { code: "id_token_required" }, "notice", 'add "permissions: id-token: write" to this job'],
     [403, { code: "api_key_invalid", error: "x" }, "warning", "the api-key does not belong to the StepSecurity tenant"],
-    [400, { code: "bad_request", error: "claims.check_run_id is required" }, "warning", "HTTP 400 (bad_request: claims.check_run_id is required)"],
+    [400, { code: "bad_request", error: "claims.check_run_id is required" }, "warning", "session request failed (HTTP 400, bad_request)"],
     [401, { code: "oidc_replayed" }, "warning", "rejected the OIDC token (oidc_replayed)"],
     [401, { code: "oidc_invalid" }, "warning", "rejected the OIDC token (oidc_invalid)"],
     [401, { code: "oidc_expired" }, "warning", "expired again"],
     [503, { code: "unavailable" }, "warning", "unavailable"],
-    [500, { code: "internal_error", error: "failed to create session" }, "warning", "HTTP 500 (internal_error: failed to create session)"],
+    [500, { code: "internal_error", error: "failed to create session" }, "warning", "session request failed (HTTP 500, internal_error)"],
     [502, undefined, "warning", "HTTP 502"],
   ])("%d %j", (status, body, level, message) => {
     const failure = describeSessionFailure({ status, body });
     expect(failure.level).toBe(level);
     expect(failure.message).toContain(message);
+  });
+
+  test("the server's error text goes to the debug log only", () => {
+    const failure = describeSessionFailure({ status: 400, body: { code: "bad_request", error: "claims.check_run_id is required" } });
+    expect(failure.message).not.toContain("check_run_id");
+    expect(mockedCore.debug).toHaveBeenCalledWith("secure-registry: session API error: claims.check_run_id is required");
   });
 
   test("rate limit includes Retry-After", () => {
@@ -372,10 +384,15 @@ describe("setupSecureRegistry", () => {
     expect(fetchCalls).toEqual([{ url: SESSION_URL, body: { oidc_token: "oidc-jwt", config: "true" } }]);
 
     expect(mockedCore.setSecret).toHaveBeenCalledWith(TOKEN);
+    const editionCall = mockedCore.debug.mock.calls.findIndex(([m]) => m === "secure-registry: edition: community");
+    expect(editionCall).toBeGreaterThanOrEqual(0);
     expect(mockedCore.setSecret.mock.invocationCallOrder[0]).toBeLessThan(
-      mockedCore.startGroup.mock.invocationCallOrder[0]
+      mockedCore.debug.mock.invocationCallOrder[editionCall]
     );
     expect(logged()).not.toContain(TOKEN);
+    // Session details are debug output only.
+    expect(visible()).not.toMatch(/edition|binding|expires at|registries:|resolved config/);
+    expect(mockedCore.startGroup).not.toHaveBeenCalled();
 
     expect(fs.readFileSync(npmrcPath(), "utf8")).toBe(
       `registry=${REGISTRY}\n//community.registry.stepsecurity.io/javascript/:_authToken=${TOKEN}\n` +
@@ -597,12 +614,13 @@ describe("setupSecureRegistry", () => {
       expect(fetchCalls).toHaveLength(0);
     });
 
-    test("prints the policy whose settings were applied", async () => {
+    test("logs the policy whose settings were applied to the debug log only", async () => {
       mockFetchSequence([created({ edition: "enterprise", policy_name: "org-sr" })]);
 
       await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true });
 
-      expect(mockedCore.info).toHaveBeenCalledWith("policy: org-sr");
+      expect(mockedCore.debug).toHaveBeenCalledWith("secure-registry: policy: org-sr");
+      expect(visible()).not.toContain("org-sr");
     });
 
     test("an enterprise session without a policy prints the tenant settings", async () => {
@@ -610,7 +628,7 @@ describe("setupSecureRegistry", () => {
 
       await setupSecureRegistry({ correlationId: CORRELATION_ID });
 
-      expect(mockedCore.info).toHaveBeenCalledWith("policy: none (tenant settings)");
+      expect(mockedCore.debug).toHaveBeenCalledWith("secure-registry: policy: none (tenant settings)");
     });
 
     test("a community session prints no policy", async () => {
@@ -635,8 +653,9 @@ describe("setupSecureRegistry", () => {
       await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true, requestedPolicy: "team-sr" });
 
       expect(mockedCore.notice).toHaveBeenCalledWith(
-        'secure-registry: settings come from the policy "org-sr" attached to this workflow, not from the policy "team-sr" named in the policy input'
+        "secure-registry: settings come from the policy attached to this workflow, not from the policy named in the policy input"
       );
+      expect(visible()).not.toMatch(/org-sr|team-sr/);
     });
 
     test("a notice says when tenant settings apply instead of the policy the policy input named", async () => {
@@ -645,7 +664,7 @@ describe("setupSecureRegistry", () => {
       await setupSecureRegistry({ correlationId: CORRELATION_ID, policyEnabled: true, requestedPolicy: "team-sr" });
 
       expect(mockedCore.notice).toHaveBeenCalledWith(
-        'secure-registry: settings come from the tenant settings, as no policy with secure-registry enabled is attached to this workflow, not from the policy "team-sr" named in the policy input'
+        "secure-registry: settings come from the tenant settings, as no policy with secure-registry enabled is attached to this workflow, not from the policy named in the policy input"
       );
     });
 
@@ -678,7 +697,7 @@ describe("setupSecureRegistry", () => {
         config: "",
       });
       expect(fetchHeaders[0].authorization).toBe(`vm-api-key ${API_KEY}`);
-      expect(mockedCore.info).toHaveBeenCalledWith("binding: api_key");
+      expect(mockedCore.debug).toHaveBeenCalledWith("secure-registry: binding: api_key");
       expect(mockedCore.notice).not.toHaveBeenCalled();
       expect(mockedCore.warning).not.toHaveBeenCalled();
     });
@@ -751,7 +770,7 @@ describe("setupSecureRegistry", () => {
       expect(mockedCore.notice).not.toHaveBeenCalled();
       expect(mockedCore.warning).not.toHaveBeenCalled();
       expect(readState()).toMatchObject({ srToken: TOKEN });
-      expect(mockedCore.info).toHaveBeenCalledWith("binding: hr_key");
+      expect(mockedCore.debug).toHaveBeenCalledWith("secure-registry: binding: hr_key");
     });
 
     test("never logs or saves the one-time key", async () => {

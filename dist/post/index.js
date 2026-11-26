@@ -32558,8 +32558,10 @@ function revokeToken(token) {
                 headers: { authorization: `Bearer ${token}` },
                 signal: AbortSignal.timeout(REVOKE_TIMEOUT_MS),
             });
+            // Token state is debug output only: job logs are readable by anyone who
+            // can read the repository.
             if (resp.status === 204) {
-                lib_core.info("secure-registry: run token revoked");
+                lib_core.debug("secure-registry: run token revoked");
                 return;
             }
             let code = "";
@@ -32569,10 +32571,10 @@ function revokeToken(token) {
             catch (_c) {
                 // Not JSON; the status is enough.
             }
-            lib_core.info(`secure-registry: could not revoke the run token (HTTP ${resp.status}${code ? `, ${code}` : ""}); it expires on its own`);
+            lib_core.debug(`secure-registry: could not revoke the run token (HTTP ${resp.status}${code ? `, ${code}` : ""}); it expires on its own`);
         }
         catch (e) {
-            lib_core.info(`secure-registry: could not revoke the run token (${e instanceof Error ? e.message : e}); it expires on its own`);
+            lib_core.debug(`secure-registry: could not revoke the run token (${e instanceof Error ? e.message : e}); it expires on its own`);
         }
     });
 }

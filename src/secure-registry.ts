@@ -436,9 +436,14 @@ export function describeSessionFailure(
     case "unavailable":
       return { level: "warning", message: "the session API is unavailable" };
     default:
+      // The server's error text can say why a claim or key was refused, so
+      // it goes to the debug log only.
+      if (err.error) {
+        core.debug(`secure-registry: session API error: ${err.error}`);
+      }
       return {
         level: "warning",
-        message: `session request failed with HTTP ${result.status}${err.code ? ` (${err.code}: ${err.error})` : ""}`,
+        message: `session request failed (HTTP ${result.status}${err.code ? `, ${err.code}` : ""})`,
       };
   }
 }
@@ -466,24 +471,24 @@ export function appliedPolicy(session: SessionResponse): string | undefined {
   return session.edition === "enterprise" ? "none (tenant settings)" : undefined;
 }
 
-// Never logs the token: it is masked before this runs and is not part of
-// any field printed here.
+// Job logs are readable by anyone who can read the repository, so the
+// session details are debug output only. The server's notices are written
+// for the workflow author and stay visible. Never logs the token: it is
+// masked before this runs and is not part of any field printed here.
 function printSession(session: SessionResponse) {
-  core.startGroup("secure-registry session");
-  core.info(`edition: ${session.edition}`);
+  core.debug(`secure-registry: edition: ${session.edition}`);
   const policy = appliedPolicy(session);
   if (policy) {
-    core.info(`policy: ${policy}`);
+    core.debug(`secure-registry: policy: ${policy}`);
   }
   if (session.binding) {
-    core.info(`binding: ${session.binding}`);
+    core.debug(`secure-registry: binding: ${session.binding}`);
   }
   if (session.expires_at) {
-    core.info(`expires at: ${new Date(session.expires_at * 1000).toISOString()}`);
+    core.debug(`secure-registry: expires at: ${new Date(session.expires_at * 1000).toISOString()}`);
   }
-  core.info(`registries: ${JSON.stringify(session.registries ?? {})}`);
-  core.info(`resolved config:\n${JSON.stringify(session.config ?? {}, null, 2)}`);
-  core.endGroup();
+  core.debug(`secure-registry: registries: ${JSON.stringify(session.registries ?? {})}`);
+  core.debug(`secure-registry: resolved config: ${JSON.stringify(session.config ?? {})}`);
 
   for (const notice of session.notices ?? []) {
     core.notice(
@@ -576,13 +581,12 @@ async function configureNpm(config: string, job: SecureRegistryOptions): Promise
   printSession(session);
   if (job.requestedPolicy && session.edition === "enterprise" && session.policy_name !== job.requestedPolicy) {
     // The session API applies the policy attached to this workflow, which
-    // the `policy` input does not choose.
+    // the `policy` input does not choose. Policy names stay out of the
+    // visible log; the applied one is in the debug output above.
     const source = session.policy_name
-      ? `the policy "${session.policy_name}" attached to this workflow`
+      ? "the policy attached to this workflow"
       : "the tenant settings, as no policy with secure-registry enabled is attached to this workflow";
-    core.notice(
-      `secure-registry: settings come from ${source}, not from the policy "${job.requestedPolicy}" named in the policy input`
-    );
+    core.notice(`secure-registry: settings come from ${source}, not from the policy named in the policy input`);
   }
 
   if (!session.token) {
